@@ -1,46 +1,54 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.XR.ARFoundation;
-using UnityEngine.XR.ARSubsystems;
 
 public class ScanningTherapyManager : MonoBehaviour
 {
-    [Header("AR")]
-    [SerializeField] private ARRaycastManager raycastManager;
-    [SerializeField] private ARPlaneManager planeManager;
+    [Header("Camera")]
     [SerializeField] private Camera arCamera;
 
     [Header("Target Prefab")]
     [SerializeField] private GameObject targetPrefab;
 
     [Header("Target Size")]
-    [Tooltip("Real-world-ish size in meters. 0.08 = 8cm.")]
     [SerializeField] private float targetScaleMeters = 0.08f;
 
-    [Header("Spawn Behaviour")]
-    [SerializeField] private float heightLiftMeters = 0.05f;      // lift above plane so it doesn't clip
-    [SerializeField] private float timeBetweenSpawns = 0.75f;
+    [Header("Spawn Timing")]
+    [SerializeField] private float timeBetweenSpawns = 0.9f;
+    [SerializeField] private float targetLifetimeSeconds = 2.5f;
+
+    [Header("Motion")]
+    [SerializeField] private float targetSpeed = 0.35f;               // m/s along the left-right path
+    [SerializeField] private float goodSideOffsetMeters = 0.35f;      // start offset magnitude
+    [SerializeField] private float neglectedSideOffsetMeters = 0.55f; // end offset magnitude
+
+    [Header("Depth / Placement (Camera-Stable)")]
+    [SerializeField] private float stableDistanceMeters = 1.2f;
+    [SerializeField] private float stableHeightOffsetMeters = -0.05f;
 
     [Header("Session")]
     [SerializeField] private float sessionDurationSeconds = 60f;
 
-    [Header("Difficulty (adaptive)")]
-    [SerializeField] private float targetSpeed = 0.35f;           // meters per second-ish feel
-    [SerializeField] private float horizontalStartOffset = 0.35f; // good side offset (meters)
-    [SerializeField] private float horizontalEndOffset = -0.55f;  // neglected side offset (meters)
-    [SerializeField] private float allowedReactionTime = 2.5f;    // seconds
-
     [Header("Neglect Side")]
-    [Tooltip("If neglected side is LEFT, target should move from RIGHT to LEFT.")]
+    [Tooltip("If neglected side is LEFT, target moves from RIGHT to LEFT.")]
     [SerializeField] private bool neglectedSideIsLeft = true;
 
-    [Header("Centering Guard")]
+    [Header("Anti-cheat Guard")]
     [SerializeField] private PhoneCenteringGuard centeringGuard;
 
-    [Header("Logging (optional)")]
-    [SerializeField] private SessionLogger logger;
+    [Tooltip("If true, we PAUSE spawns unless phone is centered.")]
+    [SerializeField] private bool blockSpawnsWhenOffCenter = true;
 
+    [Tooltip("If true, a HIT only counts if the phone has scanned into neglected side.")]
+    [SerializeField] private bool requireScanForScore = true;
+
+    [Header("Prompt (optional)")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip pleaseCenterClip;
+
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
+
+    // Runtime
     private bool running;
     private float sessionEndTime;
     private float lastSpawnTime;
@@ -48,19 +56,15 @@ public class ScanningTherapyManager : MonoBehaviour
     private int score;
     private GameObject currentTarget;
 
+    // UI hooks (optional)
     public event Action<int> OnScoreChanged;
     public event Action<float> OnTimeLeftChanged;
+    public event Action<string> OnStatusChanged;
     public event Action OnSessionEnded;
 
-    private static readonly List<ARRaycastHit> hits = new();
-
-    private void Reset()
+    private void Awake()
     {
-        raycastManager = FindFirstObjectByType<ARRaycastManager>();
-        planeManager = FindFirstObjectByType<ARPlaneManager>();
-        arCamera = Camera.main;
-        centeringGuard = FindFirstObjectByType<PhoneCenteringGuard>();
-        logger = FindFirstObjectByType<SessionLogger>();
+        if (arCamera == null) arCamera = Camera.main;
     }
 
     private void Update()
@@ -76,22 +80,38 @@ public class ScanningTherapyManager : MonoBehaviour
             return;
         }
 
-        // Enforce "phone centered" after calibration
-        if (centeringGuard != null && centeringGuard.HasCalibration && !centeringGuard.IsCenteredStable)
+        // Anti-cheat centering
+        if (centeringGuard != null && centeringGuard.HasCalibration)
         {
-            // Pause spawning while not centered
-            return;
+            if (blockSpawnsWhenOffCenter && !centeringGuard.IsCenteredStable)
+            {
+                if (centeringGuard.ShouldWarnOffCenter())
+                {
+                    OnStatusChanged?.Invoke("Please center the phone.");
+                    if (audioSource != null && pleaseCenterClip != null && !audioSource.isPlaying)
+                        audioSource.PlayOneShot(pleaseCenterClip);
+                }
+                return; // pause spawning
+            }
         }
 
-        // Spawn if none active
         if (currentTarget == null && Time.time - lastSpawnTime >= timeBetweenSpawns)
         {
-            TrySpawnOnPlane();
+            SpawnCameraStableTarget();
         }
     }
 
+    // Hook this to your UI button
     public void StartSession()
     {
+        if (arCamera == null) arCamera = Camera.main;
+
+        if (arCamera == null || targetPrefab == null)
+        {
+            Debug.LogError("[ScanningTherapy] Missing Camera or Target Prefab.");
+            return;
+        }
+
         score = 0;
         OnScoreChanged?.Invoke(score);
 
@@ -99,149 +119,96 @@ public class ScanningTherapyManager : MonoBehaviour
         sessionEndTime = Time.time + sessionDurationSeconds;
         lastSpawnTime = Time.time - timeBetweenSpawns;
 
-        // Recommended: only detect horizontal planes for rehab (floor/table), avoids ceiling/wall weirdness.
-        if (planeManager != null)
-            planeManager.requestedDetectionMode = PlaneDetectionMode.Horizontal;
+        // Calibrate midline at start (or call CalibrateNow from a separate button if you want)
+        if (centeringGuard != null && !centeringGuard.HasCalibration)
+            centeringGuard.CalibrateNow();
 
-        centeringGuard?.CalibrateNow();
-        logger?.BeginSession(neglectedSideIsLeft ? "LEFT" : "RIGHT");
+        OnStatusChanged?.Invoke("Session started. Tap targets.");
 
-        Debug.Log("[ScanningTherapy] Session started");
+        if (debugLogs) Debug.Log("[ScanningTherapy] Session started");
+    }
+
+    // Hook this to UI button if you want a dedicated calibrate
+    public void CalibrateMidlineNow()
+    {
+        if (centeringGuard != null)
+        {
+            centeringGuard.CalibrateNow();
+            OnStatusChanged?.Invoke("Calibrated. Keep phone centered.");
+        }
     }
 
     public void EndSession()
     {
         running = false;
 
-        if (currentTarget != null)
-            Destroy(currentTarget);
-
+        if (currentTarget != null) Destroy(currentTarget);
         currentTarget = null;
 
-        logger?.EndSession(score);
+        OnStatusChanged?.Invoke("Session ended.");
         OnSessionEnded?.Invoke();
 
-        Debug.Log("[ScanningTherapy] Session ended");
+        if (debugLogs) Debug.Log("[ScanningTherapy] Session ended");
     }
 
-    private void TrySpawnOnPlane()
+    private void SpawnCameraStableTarget()
     {
-        if (raycastManager == null || arCamera == null || targetPrefab == null)
-        {
-            Debug.LogError("[ScanningTherapy] Missing references on ScanningTherapyManager!");
-            return;
-        }
+        float startSign = neglectedSideIsLeft ? +1f : -1f; // good side
+        float endSign = neglectedSideIsLeft ? -1f : +1f; // neglected side
 
-        Vector2 screenCenter = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+        float startX = startSign * Mathf.Abs(goodSideOffsetMeters);
+        float endX = endSign * Mathf.Abs(neglectedSideOffsetMeters);
 
-        // Most robust for plane placement
-        bool gotHit = raycastManager.Raycast(screenCenter, hits, TrackableType.PlaneWithinPolygon);
-
-        if (!gotHit)
-        {
-            // Optional fallback: spawn 1m in front of camera if no plane yet (for demo reliability)
-            // Comment this out if you want "planes required" only.
-            SpawnFallbackInFrontOfCamera();
-            return;
-        }
-
-        Pose hitPose = hits[0].pose;
-
-        // Compute offsets relative to camera's left/right (flattened on world up)
-        Transform camT = arCamera.transform;
-        Vector3 rightFlat = Vector3.ProjectOnPlane(camT.right, Vector3.up).normalized;
-
-        // If neglected side is LEFT: start on RIGHT (+), end on LEFT (-)
-        float startX = neglectedSideIsLeft ? +Mathf.Abs(horizontalStartOffset) : -Mathf.Abs(horizontalStartOffset);
-        float endX = neglectedSideIsLeft ? -Mathf.Abs(horizontalEndOffset) : +Mathf.Abs(horizontalEndOffset);
-
-        // IMPORTANT FIX: spawn around the plane hit position (not plane + forward distance), and lift slightly.
-        Vector3 basePos = hitPose.position + Vector3.up * heightLiftMeters;
-        Vector3 startPos = basePos + rightFlat * startX;
-        Vector3 endPos = basePos + rightFlat * endX;
-
-        SpawnTarget(startPos, endPos);
-    }
-
-    private void SpawnFallbackInFrontOfCamera()
-    {
-        Transform camT = arCamera.transform;
-        Vector3 rightFlat = Vector3.ProjectOnPlane(camT.right, Vector3.up).normalized;
-        Vector3 forwardFlat = Vector3.ProjectOnPlane(camT.forward, Vector3.up).normalized;
-
-        Vector3 basePos = camT.position + forwardFlat * 1.0f + Vector3.up * 0.0f;
-
-        float startX = neglectedSideIsLeft ? +Mathf.Abs(horizontalStartOffset) : -Mathf.Abs(horizontalStartOffset);
-        float endX = neglectedSideIsLeft ? -Mathf.Abs(horizontalEndOffset) : +Mathf.Abs(horizontalEndOffset);
-
-        Vector3 startPos = basePos + rightFlat * startX;
-        Vector3 endPos = basePos + rightFlat * endX;
-
-        SpawnTarget(startPos, endPos);
-    }
-
-    private void SpawnTarget(Vector3 startPos, Vector3 endPos)
-    {
-        currentTarget = Instantiate(targetPrefab, startPos, Quaternion.identity);
-
-        // Mega-blob fix: force sane scale in AR meters
+        currentTarget = Instantiate(targetPrefab, Vector3.zero, Quaternion.identity);
         currentTarget.transform.localScale = Vector3.one * targetScaleMeters;
 
-        TargetBehaviour tb = currentTarget.GetComponent<TargetBehaviour>();
+        var tb = currentTarget.GetComponent<TargetBehaviour>();
         if (tb == null) tb = currentTarget.AddComponent<TargetBehaviour>();
 
-        tb.Init(this, startPos, endPos, targetSpeed, allowedReactionTime, arCamera);
+        tb.InitCameraRelative(
+            this,
+            arCamera,
+            stableDistanceMeters,
+            startX,
+            endX,
+            stableHeightOffsetMeters,
+            targetSpeed,
+            targetLifetimeSeconds
+        );
 
         lastSpawnTime = Time.time;
 
-        logger?.LogSpawn(Time.time, startPos, endPos, targetSpeed, allowedReactionTime);
+        if (debugLogs) Debug.Log("[ScanningTherapy] Spawned target");
     }
 
     // Called by TargetBehaviour
     public void ReportHit(float reactionTime)
     {
-        score += 1;
-        OnScoreChanged?.Invoke(score);
+        bool counts = true;
 
-        logger?.LogHit(Time.time, reactionTime, success: true);
-        AdaptDifficulty(success: true, reactionTime);
+        if (requireScanForScore && centeringGuard != null && centeringGuard.HasCalibration)
+        {
+            counts = centeringGuard.HasScannedIntoNeglected(neglectedSideIsLeft);
+        }
+
+        if (counts)
+        {
+            score += 1;
+            OnScoreChanged?.Invoke(score);
+            OnStatusChanged?.Invoke($"Hit! RT: {reactionTime:0.00}s");
+        }
+        else
+        {
+            OnStatusChanged?.Invoke("Nice try  Scan toward neglected side!");
+            // Optional: don’t reward, but also don’t punish
+        }
 
         currentTarget = null;
     }
 
     public void ReportMiss()
     {
-        logger?.LogHit(Time.time, allowedReactionTime, success: false);
-        AdaptDifficulty(success: false, allowedReactionTime);
-
+        OnStatusChanged?.Invoke("Miss (timeout)");
         currentTarget = null;
-    }
-
-    private void AdaptDifficulty(bool success, float reactionTime)
-    {
-        if (success)
-        {
-            if (reactionTime < allowedReactionTime * 0.55f)
-            {
-                targetSpeed = Mathf.Min(1.2f, targetSpeed + 0.05f);
-                // Push slightly deeper into neglected side
-                float delta = 0.05f;
-                horizontalEndOffset = neglectedSideIsLeft
-                    ? Mathf.Clamp(horizontalEndOffset - delta, -1.2f, -0.1f)
-                    : Mathf.Clamp(horizontalEndOffset + delta, 0.1f, 1.2f);
-            }
-
-            allowedReactionTime = Mathf.Clamp(allowedReactionTime - 0.05f, 1.2f, 4.0f);
-        }
-        else
-        {
-            targetSpeed = Mathf.Max(0.2f, targetSpeed - 0.05f);
-            allowedReactionTime = Mathf.Clamp(allowedReactionTime + 0.15f, 1.2f, 4.0f);
-
-            // Make it easier: pull end offset back toward center
-            horizontalEndOffset = Mathf.Lerp(horizontalEndOffset, 0f, 0.25f);
-        }
-
-        logger?.LogDifficulty(Time.time, targetSpeed, horizontalEndOffset, allowedReactionTime);
     }
 }

@@ -2,82 +2,83 @@ using UnityEngine;
 
 public class PhoneCenteringGuard : MonoBehaviour
 {
-    [Header("Tolerance")]
-    [SerializeField] private float yawToleranceDeg = 18f;
-    [SerializeField] private float stableTimeToResume = 0.35f;
+    [Header("Refs")]
+    [SerializeField] private Camera arCamera;
 
-    [Header("Debug")]
-    [SerializeField] private bool logStateChanges = false;
+    [Header("Centering Rules")]
+    [SerializeField] private float maxYawDegFromCenter = 20f;
+    [SerializeField] private float stableTimeRequired = 0.6f;
+    [SerializeField] private float badHoldTimeToWarn = 1.0f;
 
-    private float calibratedYaw;
-    private bool hasCalibration;
+    [Header("Scan Rules")]
+    [SerializeField] private float requiredScanIntoNeglectedDeg = 12f;
 
-    private bool isCentered;
-    private float centeredSince;
+    public bool HasCalibration { get; private set; }
+    public bool IsCenteredStable { get; private set; }
+    public float YawFromCenterDeg { get; private set; }
 
-    public bool HasCalibration => hasCalibration;
-    public bool IsCenteredStable => isCentered && (Time.time - centeredSince) >= stableTimeToResume;
-    public float YawDriftDeg { get; private set; }
+    private Vector3 calibratedForwardFlat;
+    private float centeredTimer;
+    private float badTimer;
 
-    private void Awake()
+    public void CalibrateNow()
     {
-        if (!SystemInfo.supportsGyroscope)
-        {
-            Debug.LogWarning("[PhoneCenteringGuard] Gyro not supported.");
-            return;
-        }
-        Input.gyro.enabled = true;
+        if (arCamera == null) arCamera = Camera.main;
+
+        Vector3 f = arCamera.transform.forward;
+        f.y = 0f;
+        calibratedForwardFlat = (f.sqrMagnitude < 0.0001f) ? Vector3.forward : f.normalized;
+
+        HasCalibration = true;
+        centeredTimer = 0f;
+        badTimer = 0f;
+        IsCenteredStable = false;
     }
 
     private void Update()
     {
-        if (!hasCalibration) return;
-
-        float currentYaw = GetYawDeg();
-        YawDriftDeg = Mathf.DeltaAngle(calibratedYaw, currentYaw);
-
-        bool within = Mathf.Abs(YawDriftDeg) <= yawToleranceDeg;
-
-        if (within)
+        if (!HasCalibration)
         {
-            if (!isCentered)
-            {
-                isCentered = true;
-                centeredSince = Time.time;
-                if (logStateChanges) Debug.Log("[PhoneCenteringGuard] Centered");
-            }
-        }
-        else
-        {
-            if (isCentered)
-            {
-                isCentered = false;
-                if (logStateChanges) Debug.Log("[PhoneCenteringGuard] Not centered");
-            }
-        }
-    }
-
-    public void CalibrateNow()
-    {
-        if (!SystemInfo.supportsGyroscope)
-        {
-            hasCalibration = false;
+            IsCenteredStable = false;
             return;
         }
 
-        calibratedYaw = GetYawDeg();
-        hasCalibration = true;
+        if (arCamera == null) arCamera = Camera.main;
+        if (arCamera == null) return;
 
-        isCentered = true;
-        centeredSince = Time.time;
+        Vector3 f = arCamera.transform.forward;
+        f.y = 0f;
+        if (f.sqrMagnitude < 0.0001f) return;
+        f.Normalize();
 
-        if (logStateChanges) Debug.Log("[PhoneCenteringGuard] Calibrated yaw=" + calibratedYaw.ToString("0.0"));
+        YawFromCenterDeg = Vector3.SignedAngle(calibratedForwardFlat, f, Vector3.up);
+
+        float absYaw = Mathf.Abs(YawFromCenterDeg);
+        bool centered = absYaw <= maxYawDegFromCenter;
+
+        if (centered)
+        {
+            badTimer = 0f;
+            centeredTimer += Time.deltaTime;
+            IsCenteredStable = centeredTimer >= stableTimeRequired;
+        }
+        else
+        {
+            centeredTimer = 0f;
+            IsCenteredStable = false;
+            badTimer += Time.deltaTime;
+        }
     }
 
-    private float GetYawDeg()
+    public bool ShouldWarnOffCenter()
+        => HasCalibration && badTimer >= badHoldTimeToWarn;
+
+    public bool HasScannedIntoNeglected(bool neglectedIsLeft)
     {
-        Quaternion q = Input.gyro.attitude;
-        Quaternion converted = new Quaternion(q.x, q.y, -q.z, -q.w);
-        return converted.eulerAngles.y;
+        if (!HasCalibration) return true;
+
+        return neglectedIsLeft
+            ? (YawFromCenterDeg <= -requiredScanIntoNeglectedDeg)
+            : (YawFromCenterDeg >= requiredScanIntoNeglectedDeg);
     }
 }
