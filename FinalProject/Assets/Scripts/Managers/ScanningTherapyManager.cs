@@ -1,5 +1,7 @@
 using System;
+using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class ScanningTherapyManager : MonoBehaviour
 {
@@ -32,18 +34,24 @@ public class ScanningTherapyManager : MonoBehaviour
     [Tooltip("If neglected side is LEFT, target moves from RIGHT to LEFT.")]
     [SerializeField] private bool neglectedSideIsLeft = true;
 
-    [Header("Anti-cheat Guard")]
+    [Header("Anti-cheat Guard (optional)")]
     [SerializeField] private PhoneCenteringGuard centeringGuard;
 
     [Tooltip("If true, we PAUSE spawns unless phone is centered.")]
     [SerializeField] private bool blockSpawnsWhenOffCenter = true;
 
-    [Tooltip("If true, a HIT only counts if the phone has scanned into neglected side.")]
-    [SerializeField] private bool requireScanForScore = true;
-
     [Header("Prompt (optional)")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip pleaseCenterClip;
+    [SerializeField] private float offCenterVoiceCooldown = 3.0f;
+
+    [Header("Menu Return")]
+    [SerializeField] private string menuSceneName = "MenuScene";
+
+    [Header("Stats + Logging (optional)")]
+    [SerializeField] private SessionStats stats;
+    // If you still have your own logger class, add it back here:
+    // [SerializeField] private SessionLogger logger;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = false;
@@ -52,6 +60,7 @@ public class ScanningTherapyManager : MonoBehaviour
     private bool running;
     private float sessionEndTime;
     private float lastSpawnTime;
+    private float lastOffCenterVoiceTime;
 
     private int score;
     private GameObject currentTarget;
@@ -76,21 +85,27 @@ public class ScanningTherapyManager : MonoBehaviour
 
         if (timeLeft <= 0f)
         {
-            EndSession();
+            EndSessionAndReturnToMenu();
             return;
         }
 
-        // Anti-cheat centering
+        // Optional anti-cheat centering
         if (centeringGuard != null && centeringGuard.HasCalibration)
         {
             if (blockSpawnsWhenOffCenter && !centeringGuard.IsCenteredStable)
             {
-                if (centeringGuard.ShouldWarnOffCenter())
+                OnStatusChanged?.Invoke("Please center the phone.");
+
+                // voice prompt cooldown
+                if (audioSource != null && pleaseCenterClip != null)
                 {
-                    OnStatusChanged?.Invoke("Please center the phone.");
-                    if (audioSource != null && pleaseCenterClip != null && !audioSource.isPlaying)
+                    if (Time.time - lastOffCenterVoiceTime >= offCenterVoiceCooldown)
+                    {
                         audioSource.PlayOneShot(pleaseCenterClip);
+                        lastOffCenterVoiceTime = Time.time;
+                    }
                 }
+
                 return; // pause spawning
             }
         }
@@ -101,7 +116,7 @@ public class ScanningTherapyManager : MonoBehaviour
         }
     }
 
-    // Hook this to your UI button
+    // Hook this to your UI button in AR scene
     public void StartSession()
     {
         if (arCamera == null) arCamera = Camera.main;
@@ -115,11 +130,13 @@ public class ScanningTherapyManager : MonoBehaviour
         score = 0;
         OnScoreChanged?.Invoke(score);
 
+        stats?.ResetStats();
+
         running = true;
         sessionEndTime = Time.time + sessionDurationSeconds;
         lastSpawnTime = Time.time - timeBetweenSpawns;
 
-        // Calibrate midline at start (or call CalibrateNow from a separate button if you want)
+        // Calibrate at start (optional)
         if (centeringGuard != null && !centeringGuard.HasCalibration)
             centeringGuard.CalibrateNow();
 
@@ -128,7 +145,6 @@ public class ScanningTherapyManager : MonoBehaviour
         if (debugLogs) Debug.Log("[ScanningTherapy] Session started");
     }
 
-    // Hook this to UI button if you want a dedicated calibrate
     public void CalibrateMidlineNow()
     {
         if (centeringGuard != null)
@@ -138,23 +154,10 @@ public class ScanningTherapyManager : MonoBehaviour
         }
     }
 
-    public void EndSession()
-    {
-        running = false;
-
-        if (currentTarget != null) Destroy(currentTarget);
-        currentTarget = null;
-
-        OnStatusChanged?.Invoke("Session ended.");
-        OnSessionEnded?.Invoke();
-
-        if (debugLogs) Debug.Log("[ScanningTherapy] Session ended");
-    }
-
     private void SpawnCameraStableTarget()
     {
         float startSign = neglectedSideIsLeft ? +1f : -1f; // good side
-        float endSign = neglectedSideIsLeft ? -1f : +1f; // neglected side
+        float endSign = neglectedSideIsLeft ? -1f : +1f;   // neglected side
 
         float startX = startSign * Mathf.Abs(goodSideOffsetMeters);
         float endX = endSign * Mathf.Abs(neglectedSideOffsetMeters);
@@ -166,14 +169,14 @@ public class ScanningTherapyManager : MonoBehaviour
         if (tb == null) tb = currentTarget.AddComponent<TargetBehaviour>();
 
         tb.InitCameraRelative(
-            this,
-            arCamera,
-            stableDistanceMeters,
-            startX,
-            endX,
-            stableHeightOffsetMeters,
-            targetSpeed,
-            targetLifetimeSeconds
+            manager: this,
+            arCamera: arCamera,
+            distanceMeters: stableDistanceMeters,
+            startOffsetXMeters: startX,
+            endOffsetXMeters: endX,
+            heightOffsetMeters: stableHeightOffsetMeters,
+            speedMetersPerSec: targetSpeed,
+            maxLifeTimeSeconds: targetLifetimeSeconds
         );
 
         lastSpawnTime = Time.time;
@@ -184,24 +187,11 @@ public class ScanningTherapyManager : MonoBehaviour
     // Called by TargetBehaviour
     public void ReportHit(float reactionTime)
     {
-        bool counts = true;
+        score += 1;
+        OnScoreChanged?.Invoke(score);
+        OnStatusChanged?.Invoke($"Hit! RT: {reactionTime:0.00}s");
 
-        if (requireScanForScore && centeringGuard != null && centeringGuard.HasCalibration)
-        {
-            counts = centeringGuard.HasScannedIntoNeglected(neglectedSideIsLeft);
-        }
-
-        if (counts)
-        {
-            score += 1;
-            OnScoreChanged?.Invoke(score);
-            OnStatusChanged?.Invoke($"Hit! RT: {reactionTime:0.00}s");
-        }
-        else
-        {
-            OnStatusChanged?.Invoke("Nice try  Scan toward neglected side!");
-            // Optional: don’t reward, but also don’t punish
-        }
+        stats?.RegisterHit(reactionTime);
 
         currentTarget = null;
     }
@@ -209,6 +199,40 @@ public class ScanningTherapyManager : MonoBehaviour
     public void ReportMiss()
     {
         OnStatusChanged?.Invoke("Miss (timeout)");
+
+        stats?.RegisterMiss();
+
         currentTarget = null;
+    }
+
+    // Call this when time runs out, or hook it to an "End" button
+    public void EndSessionAndReturnToMenu()
+    {
+        running = false;
+
+        if (currentTarget != null) Destroy(currentTarget);
+        currentTarget = null;
+
+        // Build result + save
+        var r = new SessionResult
+        {
+            dateLocal = ProgressStore.TodayDateLocal(),
+            score = score,
+            attempts = stats != null ? stats.Attempts : 0,
+            avgReactionTime = stats != null ? stats.AvgReactionTime : 0f,
+            hitRate = stats != null ? stats.HitRate : 0f,
+            neglectedSide = neglectedSideIsLeft ? "LEFT" : "RIGHT"
+        };
+
+        ProgressStore.SaveLast(r);
+        ProgressStore.SaveToday(r);
+
+        // logger?.EndSession(score);
+
+        OnSessionEnded?.Invoke();
+
+        if (debugLogs) Debug.Log("[ScanningTherapy] Session ended. Returning to menu.");
+
+        SceneManager.LoadScene(menuSceneName);
     }
 }
