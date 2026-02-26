@@ -19,9 +19,9 @@ public class ScanningTherapyManager : MonoBehaviour
     [SerializeField] private float targetLifetimeSeconds = 2.5f;
 
     [Header("Motion")]
-    [SerializeField] private float targetSpeed = 0.35f;               // m/s along the left-right path
-    [SerializeField] private float goodSideOffsetMeters = 0.35f;      // start offset magnitude
-    [SerializeField] private float neglectedSideOffsetMeters = 0.55f; // end offset magnitude
+    [SerializeField] private float targetSpeed = 0.35f;             
+    [SerializeField] private float goodSideOffsetMeters = 0.35f;      
+    [SerializeField] private float neglectedSideOffsetMeters = 0.55f; 
 
     [Header("Depth / Placement (Camera-Stable)")]
     [SerializeField] private float stableDistanceMeters = 1.2f;
@@ -50,13 +50,10 @@ public class ScanningTherapyManager : MonoBehaviour
 
     [Header("Stats + Logging (optional)")]
     [SerializeField] private SessionStats stats;
-    // If you still have your own logger class, add it back here:
-    // [SerializeField] private SessionLogger logger;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = false;
 
-    // Runtime
     private bool running;
     private float sessionEndTime;
     private float lastSpawnTime;
@@ -65,7 +62,6 @@ public class ScanningTherapyManager : MonoBehaviour
     private int score;
     private GameObject currentTarget;
 
-    // UI hooks (optional)
     public event Action<int> OnScoreChanged;
     public event Action<float> OnTimeLeftChanged;
     public event Action<string> OnStatusChanged;
@@ -89,14 +85,12 @@ public class ScanningTherapyManager : MonoBehaviour
             return;
         }
 
-        // Optional anti-cheat centering
         if (centeringGuard != null && centeringGuard.HasCalibration)
         {
             if (blockSpawnsWhenOffCenter && !centeringGuard.IsCenteredStable)
             {
                 OnStatusChanged?.Invoke("Please center the phone.");
 
-                // voice prompt cooldown
                 if (audioSource != null && pleaseCenterClip != null)
                 {
                     if (Time.time - lastOffCenterVoiceTime >= offCenterVoiceCooldown)
@@ -106,7 +100,7 @@ public class ScanningTherapyManager : MonoBehaviour
                     }
                 }
 
-                return; // pause spawning
+                return;
             }
         }
 
@@ -116,7 +110,6 @@ public class ScanningTherapyManager : MonoBehaviour
         }
     }
 
-    // Hook this to your UI button in AR scene
     public void StartSession()
     {
         if (arCamera == null) arCamera = Camera.main;
@@ -136,7 +129,6 @@ public class ScanningTherapyManager : MonoBehaviour
         sessionEndTime = Time.time + sessionDurationSeconds;
         lastSpawnTime = Time.time - timeBetweenSpawns;
 
-        // Calibrate at start (optional)
         if (centeringGuard != null && !centeringGuard.HasCalibration)
             centeringGuard.CalibrateNow();
 
@@ -156,8 +148,8 @@ public class ScanningTherapyManager : MonoBehaviour
 
     private void SpawnCameraStableTarget()
     {
-        float startSign = neglectedSideIsLeft ? +1f : -1f; // good side
-        float endSign = neglectedSideIsLeft ? -1f : +1f;   // neglected side
+        float startSign = neglectedSideIsLeft ? +1f : -1f;
+        float endSign = neglectedSideIsLeft ? -1f : +1f;
 
         float startX = startSign * Mathf.Abs(goodSideOffsetMeters);
         float endX = endSign * Mathf.Abs(neglectedSideOffsetMeters);
@@ -184,7 +176,6 @@ public class ScanningTherapyManager : MonoBehaviour
         if (debugLogs) Debug.Log("[ScanningTherapy] Spawned target");
     }
 
-    // Called by TargetBehaviour
     public void ReportHit(float reactionTime)
     {
         score += 1;
@@ -205,7 +196,6 @@ public class ScanningTherapyManager : MonoBehaviour
         currentTarget = null;
     }
 
-    // Call this when time runs out, or hook it to an "End" button
     public void EndSessionAndReturnToMenu()
     {
         running = false;
@@ -213,7 +203,6 @@ public class ScanningTherapyManager : MonoBehaviour
         if (currentTarget != null) Destroy(currentTarget);
         currentTarget = null;
 
-        // Build result + save
         var r = new SessionResult
         {
             dateLocal = ProgressStore.TodayDateLocal(),
@@ -226,8 +215,6 @@ public class ScanningTherapyManager : MonoBehaviour
 
         ProgressStore.SaveLast(r);
         ProgressStore.SaveToday(r);
-
-        // logger?.EndSession(score);
 
         OnSessionEnded?.Invoke();
 

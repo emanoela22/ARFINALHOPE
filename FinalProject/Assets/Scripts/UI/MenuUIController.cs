@@ -37,18 +37,15 @@ public class MenuUIController : MonoBehaviour
 
     public void RefreshAll()
     {
-        // Home
         if (welcomeText != null) welcomeText.text = "Welcome back, User";
         if (streakText != null) streakText.text = $"Streak:\nDay {Mathf.Max(1, ProgressStore.GetStreak())}";
 
-        // Today
         var today = ProgressStore.LoadToday();
         if (today != null)
         {
             SetTodayTexts(today);
         }
 
-        // Last
         var last = ProgressStore.LoadLast();
         if (last != null)
         {
@@ -71,7 +68,6 @@ public class MenuUIController : MonoBehaviour
         if (lastDateText != null) lastDateText.text = $"Date: {r.dateLocal}";
     }
 
-    // ---------- Button Hooks ----------
     public void OnStartSessionPressed()
     {
         SceneManager.LoadScene(arSceneName);
@@ -95,7 +91,6 @@ public class MenuUIController : MonoBehaviour
         ShowHome();
     }
 
-    // ---------- Panel helpers ----------
     void HideAll()
     {
         if (homePanel) homePanel.SetActive(false);

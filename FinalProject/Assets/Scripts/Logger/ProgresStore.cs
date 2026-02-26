@@ -35,7 +35,7 @@ public static class ProgressStore
         if (!PlayerPrefs.HasKey(KEY_TODAY_DATE)) return null;
 
         string savedDate = PlayerPrefs.GetString(KEY_TODAY_DATE);
-        if (savedDate != TodayDateLocal()) return null; // not today's data
+        if (savedDate != TodayDateLocal()) return null;
 
         return JsonUtility.FromJson<SessionResult>(PlayerPrefs.GetString(KEY_TODAY));
     }
@@ -44,8 +44,6 @@ public static class ProgressStore
 
     public static int GetStreak()
     {
-        // Simple “streak” placeholder:
-        // 1 if today completed, else 0. (We can expand later to real streak history)
         return HasTodaySession() ? 1 : 0;
     }
 }

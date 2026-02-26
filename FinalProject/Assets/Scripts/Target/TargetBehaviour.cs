@@ -25,7 +25,7 @@ public class TargetBehaviour : MonoBehaviour
     private float heightOffset;
 
     [Header("Smoothing")]
-    [SerializeField] private float followSmoothing = 25f; // increase if jittery
+    [SerializeField] private float followSmoothing = 25f;
     private Vector3 smoothedPos;
     private bool hasSmoothed;
 
@@ -61,11 +61,9 @@ public class TargetBehaviour : MonoBehaviour
         resolved = false;
         t01 = 0f;
 
-        // Collider must exist for Physics.Raycast taps
         var col = GetComponent<Collider>();
         col.isTrigger = false;
 
-        // IMPORTANT: no physics jitter
         var rb = GetComponent<Rigidbody>();
         if (rb != null) rb.isKinematic = true;
 
@@ -112,8 +110,8 @@ public class TargetBehaviour : MonoBehaviour
 
     private void HandleTap()
     {
+
 #if ENABLE_INPUT_SYSTEM
-        // New input system (Android builds love this)
         if (Touch.activeTouches.Count > 0)
         {
             var t = Touch.activeTouches[0];
