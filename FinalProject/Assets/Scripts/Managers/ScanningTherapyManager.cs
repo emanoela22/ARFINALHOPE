@@ -1,5 +1,5 @@
 using System;
-using UnityEditor;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -8,64 +8,61 @@ public class ScanningTherapyManager : MonoBehaviour
     [Header("Camera")]
     [SerializeField] private Camera arCamera;
 
+    [Header("Stabilization Frame (REQUIRED)")]
+    [SerializeField] private StabilizedFrame stabilizedFrame;
+
     [Header("Target Prefab")]
     [SerializeField] private GameObject targetPrefab;
 
-    [Header("Target Size")]
-    [SerializeField] private float targetScaleMeters = 0.08f;
+    [Header("Target Size (meters-ish)")]
+    [SerializeField] private float targetScaleMeters = 0.15f;
 
     [Header("Spawn Timing")]
     [SerializeField] private float timeBetweenSpawns = 0.9f;
     [SerializeField] private float targetLifetimeSeconds = 2.5f;
 
     [Header("Motion")]
-    [SerializeField] private float targetSpeed = 0.35f;               // m/s along the left-right path
-    [SerializeField] private float goodSideOffsetMeters = 0.35f;      // start offset magnitude
-    [SerializeField] private float neglectedSideOffsetMeters = 0.55f; // end offset magnitude
+    [SerializeField] private float targetSpeed = 0.35f;
+    [SerializeField] private float goodSideOffsetMeters = 0.15f;
+    [SerializeField] private float neglectedSideOffsetMeters = 0.25f;
 
-    [Header("Depth / Placement (Camera-Stable)")]
-    [SerializeField] private float stableDistanceMeters = 1.2f;
-    [SerializeField] private float stableHeightOffsetMeters = -0.05f;
+    [Header("Placement (local to stabilized frame)")]
+    [SerializeField] private float stableDistanceMeters = 1.5f;
+    [SerializeField] private float stableHeightOffsetMeters = 0.10f;
 
     [Header("Session")]
     [SerializeField] private float sessionDurationSeconds = 60f;
 
     [Header("Neglect Side")]
-    [Tooltip("If neglected side is LEFT, target moves from RIGHT to LEFT.")]
     [SerializeField] private bool neglectedSideIsLeft = true;
 
-    [Header("Anti-cheat Guard (optional)")]
+    [Header("Anti-cheat / Boundaries (optional)")]
     [SerializeField] private PhoneCenteringGuard centeringGuard;
-
-    [Tooltip("If true, we PAUSE spawns unless phone is centered.")]
     [SerializeField] private bool blockSpawnsWhenOffCenter = true;
+    [SerializeField] private bool requireScanForScore = false;
 
-    [Header("Prompt (optional)")]
+    [Header("Audio prompt (optional)")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip pleaseCenterClip;
-    [SerializeField] private float offCenterVoiceCooldown = 3.0f;
+    [SerializeField] private float offCenterVoiceCooldown = 3f;
 
     [Header("Menu Return")]
+    [SerializeField] private bool returnToMenuOnEnd = true;
     [SerializeField] private string menuSceneName = "MenuScene";
-
-    [Header("Stats + Logging (optional)")]
-    [SerializeField] private SessionStats stats;
-    // If you still have your own logger class, add it back here:
-    // [SerializeField] private SessionLogger logger;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = false;
 
-    // Runtime
     private bool running;
+    private bool ending;
+
     private float sessionEndTime;
     private float lastSpawnTime;
-    private float lastOffCenterVoiceTime;
 
     private int score;
     private GameObject currentTarget;
+    private float nextVoiceTime;
 
-    // UI hooks (optional)
     public event Action<int> OnScoreChanged;
     public event Action<float> OnTimeLeftChanged;
     public event Action<string> OnStatusChanged;
@@ -78,161 +75,190 @@ public class ScanningTherapyManager : MonoBehaviour
 
     private void Update()
     {
-        if (!running) return;
+        if (!running || ending) return;
 
         float timeLeft = Mathf.Max(0f, sessionEndTime - Time.time);
         OnTimeLeftChanged?.Invoke(timeLeft);
 
         if (timeLeft <= 0f)
         {
-            EndSessionAndReturnToMenu();
+            EndSession();
             return;
         }
 
-        // Optional anti-cheat centering
+        // Off-center warning + (optional) block spawns
         if (centeringGuard != null && centeringGuard.HasCalibration)
         {
-            if (blockSpawnsWhenOffCenter && !centeringGuard.IsCenteredStable)
+            bool offCenter = !centeringGuard.IsCenteredStable;
+
+            if (offCenter && centeringGuard.ShouldWarnOffCenter())
             {
                 OnStatusChanged?.Invoke("Please center the phone.");
 
-                // voice prompt cooldown
-                if (audioSource != null && pleaseCenterClip != null)
+                if (audioSource != null && pleaseCenterClip != null && Time.time >= nextVoiceTime)
                 {
-                    if (Time.time - lastOffCenterVoiceTime >= offCenterVoiceCooldown)
-                    {
-                        audioSource.PlayOneShot(pleaseCenterClip);
-                        lastOffCenterVoiceTime = Time.time;
-                    }
+                    audioSource.PlayOneShot(pleaseCenterClip);
+                    nextVoiceTime = Time.time + offCenterVoiceCooldown;
                 }
-
-                return; // pause spawning
             }
+
+            if (blockSpawnsWhenOffCenter && offCenter)
+                return;
         }
 
         if (currentTarget == null && Time.time - lastSpawnTime >= timeBetweenSpawns)
         {
-            SpawnCameraStableTarget();
+            // Only gate spawns, not the whole session update
+            if (blockSpawnsWhenOffCenter && centeringGuard != null && centeringGuard.HasCalibration)
+            {
+                if (!centeringGuard.IsCenteredStable)
+                {
+                    OnStatusChanged?.Invoke("Please center the phone.");
+                    TryPlayOffCenterAudio();
+                    return;
+                }
+            }
+
+            SpawnStabilizedTarget();
         }
     }
 
-    // Hook this to your UI button in AR scene
+    private void TryPlayOffCenterAudio()
+    {
+        if (audioSource == null || pleaseCenterClip == null) return;
+        if (Time.time < nextVoiceTime) return;
+
+        audioSource.PlayOneShot(pleaseCenterClip);
+        nextVoiceTime = Time.time + offCenterVoiceCooldown;
+    }
+
     public void StartSession()
     {
         if (arCamera == null) arCamera = Camera.main;
 
-        if (arCamera == null || targetPrefab == null)
+        if (arCamera == null || targetPrefab == null || stabilizedFrame == null)
         {
-            Debug.LogError("[ScanningTherapy] Missing Camera or Target Prefab.");
+            Debug.LogError("[ScanningTherapy] Missing Camera, Target Prefab, or StabilizedFrame.");
             return;
         }
+
+        ending = false;
+
+        stabilizedFrame.SetSourceCamera(arCamera);
+        stabilizedFrame.SnapNow();
+
+        if (centeringGuard != null)
+            centeringGuard.CalibrateNow();
+
+        nextVoiceTime = 0f;
 
         score = 0;
         OnScoreChanged?.Invoke(score);
 
-        stats?.ResetStats();
-
         running = true;
         sessionEndTime = Time.time + sessionDurationSeconds;
         lastSpawnTime = Time.time - timeBetweenSpawns;
-
-        // Calibrate at start (optional)
-        if (centeringGuard != null && !centeringGuard.HasCalibration)
-            centeringGuard.CalibrateNow();
 
         OnStatusChanged?.Invoke("Session started. Tap targets.");
 
         if (debugLogs) Debug.Log("[ScanningTherapy] Session started");
     }
 
-    public void CalibrateMidlineNow()
+    private void SpawnStabilizedTarget()
     {
-        if (centeringGuard != null)
-        {
-            centeringGuard.CalibrateNow();
-            OnStatusChanged?.Invoke("Calibrated. Keep phone centered.");
-        }
-    }
+        if (ending) return;
+        if (stabilizedFrame == null) return;
 
-    private void SpawnCameraStableTarget()
-    {
+        Transform frame = stabilizedFrame.transform;
+
+        // Base in LOCAL space of stabilized frame (clean, consistent)
+        Vector3 baseLocal = new Vector3(0f, stableHeightOffsetMeters, stableDistanceMeters);
+
         float startSign = neglectedSideIsLeft ? +1f : -1f; // good side
-        float endSign = neglectedSideIsLeft ? -1f : +1f;   // neglected side
+        float endSign = neglectedSideIsLeft ? -1f : +1f; // neglected side
 
-        float startX = startSign * Mathf.Abs(goodSideOffsetMeters);
-        float endX = endSign * Mathf.Abs(neglectedSideOffsetMeters);
+        Vector3 startLocal = baseLocal + Vector3.right * (startSign * Mathf.Abs(goodSideOffsetMeters));
+        Vector3 endLocal = baseLocal + Vector3.right * (endSign * Mathf.Abs(neglectedSideOffsetMeters));
 
-        currentTarget = Instantiate(targetPrefab, Vector3.zero, Quaternion.identity);
+        // Convert ONCE to world points
+        Vector3 startWorld = frame.TransformPoint(startLocal);
+        Vector3 endWorld = frame.TransformPoint(endLocal);
+
+        currentTarget = Instantiate(targetPrefab, startWorld, Quaternion.identity);
         currentTarget.transform.localScale = Vector3.one * targetScaleMeters;
 
         var tb = currentTarget.GetComponent<TargetBehaviour>();
         if (tb == null) tb = currentTarget.AddComponent<TargetBehaviour>();
 
-        tb.InitCameraRelative(
+        tb.InitWorldPath(
             manager: this,
             arCamera: arCamera,
-            distanceMeters: stableDistanceMeters,
-            startOffsetXMeters: startX,
-            endOffsetXMeters: endX,
-            heightOffsetMeters: stableHeightOffsetMeters,
+            startWorldPos: startWorld,
+            endWorldPos: endWorld,
             speedMetersPerSec: targetSpeed,
-            maxLifeTimeSeconds: targetLifetimeSeconds
+            lifeSeconds: targetLifetimeSeconds
         );
 
         lastSpawnTime = Time.time;
 
-        if (debugLogs) Debug.Log("[ScanningTherapy] Spawned target");
+        if (debugLogs) Debug.Log("[ScanningTherapy] Spawned target.");
     }
 
-    // Called by TargetBehaviour
     public void ReportHit(float reactionTime)
     {
-        score += 1;
-        OnScoreChanged?.Invoke(score);
-        OnStatusChanged?.Invoke($"Hit! RT: {reactionTime:0.00}s");
+        if (ending) return;
 
-        stats?.RegisterHit(reactionTime);
+        bool counts = true;
+
+        if (requireScanForScore && centeringGuard != null && centeringGuard.HasCalibration)
+            counts = centeringGuard.HasScannedIntoNeglected(neglectedSideIsLeft);
+
+        if (counts)
+        {
+            score += 1;
+            OnScoreChanged?.Invoke(score);
+            OnStatusChanged?.Invoke($"Hit! RT: {reactionTime:0.00}s");
+        }
+        else
+        {
+            OnStatusChanged?.Invoke("Scan further toward neglected side.");
+        }
 
         currentTarget = null;
     }
 
     public void ReportMiss()
     {
+        if (ending) return;
         OnStatusChanged?.Invoke("Miss (timeout)");
-
-        stats?.RegisterMiss();
-
         currentTarget = null;
     }
 
-    // Call this when time runs out, or hook it to an "End" button
-    public void EndSessionAndReturnToMenu()
+    public void EndSession()
     {
+        if (ending) return;
+        ending = true;
         running = false;
 
-        if (currentTarget != null) Destroy(currentTarget);
-        currentTarget = null;
-
-        // Build result + save
-        var r = new SessionResult
+        // Stop + destroy target safely
+        if (currentTarget != null)
         {
-            dateLocal = ProgressStore.TodayDateLocal(),
-            score = score,
-            attempts = stats != null ? stats.Attempts : 0,
-            avgReactionTime = stats != null ? stats.AvgReactionTime : 0f,
-            hitRate = stats != null ? stats.HitRate : 0f,
-            neglectedSide = neglectedSideIsLeft ? "LEFT" : "RIGHT"
-        };
-
-        ProgressStore.SaveLast(r);
-        ProgressStore.SaveToday(r);
-
-        // logger?.EndSession(score);
+            var tb = currentTarget.GetComponent<TargetBehaviour>();
+            if (tb != null) tb.ForceStop();
+            Destroy(currentTarget);
+            currentTarget = null;
+        }
 
         OnSessionEnded?.Invoke();
 
-        if (debugLogs) Debug.Log("[ScanningTherapy] Session ended. Returning to menu.");
+        if (returnToMenuOnEnd && !string.IsNullOrEmpty(menuSceneName))
+            StartCoroutine(LoadMenuEndOfFrame());
+    }
 
+    private IEnumerator LoadMenuEndOfFrame()
+    {
+        // Wait end-of-frame so Destroy() completes cleanly
+        yield return new WaitForEndOfFrame();
         SceneManager.LoadScene(menuSceneName);
     }
 }
