@@ -4,8 +4,7 @@ public class ARPlacementManager : MonoBehaviour
 {
     [SerializeField] private GameObject arContentPrefab;
     [SerializeField] private GameUIController gameUIController;
-    [SerializeField] private float spawnDistance = 1.0f;
-    [SerializeField] private float verticalOffset = -0.1f;
+    [SerializeField] private RingTracker ringTracker;
 
     private GameObject spawnedObject;
 
@@ -25,36 +24,32 @@ public class ARPlacementManager : MonoBehaviour
             return;
         }
 
-        Vector3 spawnPosition =
-            Camera.main.transform.position +
-            Camera.main.transform.forward * spawnDistance +
-            Vector3.up * verticalOffset;
+        Vector3 spawnPosition = Camera.main.transform.position + Camera.main.transform.forward * 1.0f;
+        Quaternion spawnRotation = Quaternion.LookRotation(Camera.main.transform.forward);
 
-        spawnedObject = Instantiate(arContentPrefab, spawnPosition, Quaternion.identity);
+        spawnedObject = Instantiate(arContentPrefab, spawnPosition, spawnRotation);
 
         ButterflyMovement butterfly = spawnedObject.GetComponentInChildren<ButterflyMovement>();
+        FollowCameraAnchor anchor = spawnedObject.GetComponent<FollowCameraAnchor>();
 
-        if (butterfly != null && gameUIController != null)
+        if (anchor != null)
         {
-            gameUIController.RegisterButterfly(butterfly);
+            anchor.Initialize(Camera.main.transform);
+        }
+
+        if (butterfly != null)
+        {
+            if (gameUIController != null)
+                gameUIController.RegisterButterfly(butterfly);
+
+            if (ringTracker != null)
+                ringTracker.SetButterfly(butterfly);
+
             Debug.Log("Butterfly registered successfully.");
         }
         else
         {
-            Debug.LogWarning("ButterflyMovement or GameUIController missing.");
+            Debug.LogWarning("ButterflyMovement not found in spawned prefab.");
         }
-    }
-
-    public void ResetExercisePosition()
-    {
-        if (spawnedObject == null || Camera.main == null)
-            return;
-
-        Vector3 newPosition =
-            Camera.main.transform.position +
-            Camera.main.transform.forward * spawnDistance +
-            Vector3.up * verticalOffset;
-
-        spawnedObject.transform.position = newPosition;
     }
 }

@@ -2,110 +2,64 @@ using UnityEngine;
 
 public class ButterflyMovement : MonoBehaviour
 {
-    public enum MovementDirection
+    public enum Direction
     {
         Left,
-        Right,
-        Both,
-        Center
+        Right
     }
 
-    [Header("Movement Settings")]
-    [SerializeField] private float moveSpeed = 0.2f;
-    [SerializeField] private float moveRangeX = 0.15f;
-    [SerializeField] private float moveRangeY = 0.1f;
-    [SerializeField] private float targetReachDistance = 0.02f;
-    [SerializeField] private float waitTimeAtPoint = 0.4f;
+    [SerializeField] private Direction moveDirection = Direction.Left;
+    [SerializeField] private float speed = 0.1f;
+    [SerializeField] private float distance = 0.15f;
 
-    [Header("Direction Control")]
-    [SerializeField] private MovementDirection movementDirection = MovementDirection.Both;
-
-    private Vector3 centerPosition;
-    private Vector3 targetPosition;
-    private float waitTimer;
+    private Vector3 startPos;
+    private Vector3 targetPos;
+    private bool goingOut = true;
 
     private void Start()
     {
-        centerPosition = transform.localPosition;
-        PickNewTargetPosition();
+        startPos = transform.localPosition;
+        ResetPath();
     }
 
     private void Update()
     {
-        MoveToTarget();
-    }
+        Vector3 target = goingOut ? targetPos : startPos;
 
-    private void MoveToTarget()
-    {
-        if (Vector3.Distance(transform.localPosition, targetPosition) > targetReachDistance)
-        {
-            transform.localPosition = Vector3.MoveTowards(
-                transform.localPosition,
-                targetPosition,
-                moveSpeed * Time.deltaTime
-            );
-        }
-        else
-        {
-            waitTimer += Time.deltaTime;
+        transform.localPosition = Vector3.MoveTowards(
+            transform.localPosition,
+            target,
+            speed * Time.deltaTime
+        );
 
-            if (waitTimer >= waitTimeAtPoint)
-            {
-                waitTimer = 0f;
-                PickNewTargetPosition();
-            }
+        if (Vector3.Distance(transform.localPosition, target) < 0.005f)
+        {
+            goingOut = !goingOut;
+
+            if (goingOut)
+                ResetPath();
         }
     }
 
-    private void PickNewTargetPosition()
+    private void ResetPath()
     {
-        float randomX = 0f;
-        float randomY = Random.Range(-moveRangeY, moveRangeY);
+        float x = moveDirection == Direction.Left ? -distance : distance;
 
-        switch (movementDirection)
-        {
-            case MovementDirection.Left:
-                randomX = Random.Range(-moveRangeX, 0f);
-                break;
-
-            case MovementDirection.Right:
-                randomX = Random.Range(0f, moveRangeX);
-                break;
-
-            case MovementDirection.Both:
-                randomX = Random.Range(-moveRangeX, moveRangeX);
-                break;
-
-            case MovementDirection.Center:
-                randomX = Random.Range(-moveRangeX * 0.25f, moveRangeX * 0.25f);
-                randomY = Random.Range(-moveRangeY * 0.25f, moveRangeY * 0.25f);
-                break;
-        }
-
-        targetPosition = centerPosition + new Vector3(randomX, randomY, 0f);
+        targetPos = new Vector3(
+            startPos.x + x,
+            startPos.y,
+            startPos.z
+        );
     }
 
-    public void SetMoveSpeed(float newSpeed)
+    public Vector3 GetWorldPosition()
     {
-        moveSpeed = newSpeed;
-    }
-
-    public void SetMoveRange(float newRange)
-    {
-        moveRangeX = newRange;
-        moveRangeY = newRange * 0.6f;
-    }
-
-    public void SetDirection(int directionIndex)
-    {
-        movementDirection = (MovementDirection)directionIndex;
-        PickNewTargetPosition();
+        return transform.position;
     }
 
     public void ResetButterflyPosition()
     {
-        transform.localPosition = centerPosition;
-        waitTimer = 0f;
-        PickNewTargetPosition();
+        transform.localPosition = startPos;
+        ResetPath();
     }
 }

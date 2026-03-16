@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!1001 &4981787569803910087
+--- !u!1001 &6037746513589123751
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -18,19 +18,19 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8167879441121237377, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
       propertyPath: m_Name
-      value: Testing 1 Variant 1
+      value: Testing 1 Variant 1 1 1
       objectReference: {fileID: 0}
     - target: {fileID: 8796079549072737083, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
       propertyPath: m_LocalScale.x
-      value: 25
+      value: 15
       objectReference: {fileID: 0}
     - target: {fileID: 8796079549072737083, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
       propertyPath: m_LocalScale.y
-      value: 25
+      value: 15
       objectReference: {fileID: 0}
     - target: {fileID: 8796079549072737083, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
       propertyPath: m_LocalScale.z
-      value: 25
+      value: 15
       objectReference: {fileID: 0}
     - target: {fileID: 8796079549072737083, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
       propertyPath: m_LocalPosition.x
@@ -75,5 +75,51 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 8167879441121237377, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 8919193089001187365}
+    - targetCorrespondingSourceObject: {fileID: 8167879441121237377, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: -7892028808848378244}
   m_SourcePrefab: {fileID: 100100000, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
+--- !u!1 &2490562497768743718 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 8167879441121237377, guid: 1d0b7e242a943df4cbf61317c5a342ff, type: 3}
+  m_PrefabInstance: {fileID: 6037746513589123751}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &8919193089001187365
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2490562497768743718}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 19414ad39413c3b4c873a5b13da4fe74, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  moveSpeed: 0.15
+  horizontalDistance: 0.25
+  startOffsetX: 0.02
+  targetReachDistance: 0.005
+  maxAllowedDistanceFromCenter: 0.25
+  movementDirection: 0
+--- !u!114 &-7892028808848378244
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2490562497768743718}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3d193cf0d9d56942b57606dea4c2587, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cameraTransform: {fileID: 0}
+  distanceFromCamera: 1
+  verticalOffset: 0
+  followSmoothSpeed: 4
+  lockYRotationOnly: 1

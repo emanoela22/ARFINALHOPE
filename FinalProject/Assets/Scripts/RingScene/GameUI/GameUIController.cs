@@ -16,28 +16,4 @@ public class GameUIController : MonoBehaviour
             butterflyMovement.ResetButterflyPosition();
         }
     }
-
-    public void SetButterflySpeed(float value)
-    {
-        if (butterflyMovement != null)
-        {
-            butterflyMovement.SetMoveSpeed(value);
-        }
-    }
-
-    public void SetButterflyRange(float value)
-    {
-        if (butterflyMovement != null)
-        {
-            butterflyMovement.SetMoveRange(value);
-        }
-    }
-
-    public void SetButterflyDirection(int index)
-    {
-        if (butterflyMovement != null)
-        {
-            butterflyMovement.SetDirection(index);
-        }
-    }
 }
