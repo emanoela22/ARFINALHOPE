@@ -7013,7 +7013,7 @@ MonoBehaviour:
   lastAvgRtText: {fileID: 1835406534}
   lastHitRateText: {fileID: 1650043298}
   lastDateText: {fileID: 241525865}
-  arSceneName: SampleScene
+  arSceneName: SampleScene 1
   menuSceneName: MenuScene
 --- !u!4 &2093259888
 Transform:
