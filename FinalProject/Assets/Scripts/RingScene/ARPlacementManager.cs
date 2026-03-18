@@ -3,7 +3,6 @@ using UnityEngine;
 public class ARPlacementManager : MonoBehaviour
 {
     [SerializeField] private GameObject arContentPrefab;
-    [SerializeField] private GameUIController gameUIController;
     [SerializeField] private RingTracker ringTracker;
 
     private GameObject spawnedObject;
@@ -29,27 +28,17 @@ public class ARPlacementManager : MonoBehaviour
 
         spawnedObject = Instantiate(arContentPrefab, spawnPosition, spawnRotation);
 
-        ButterflyMovement butterfly = spawnedObject.GetComponentInChildren<ButterflyMovement>();
         FollowCameraAnchor anchor = spawnedObject.GetComponent<FollowCameraAnchor>();
+        ButterflyTargetController targetController = spawnedObject.GetComponent<ButterflyTargetController>();
 
         if (anchor != null)
         {
             anchor.Initialize(Camera.main.transform);
         }
 
-        if (butterfly != null)
-        {
-            if (gameUIController != null)
-                gameUIController.RegisterButterfly(butterfly);
-
-            if (ringTracker != null)
-                ringTracker.SetButterfly(butterfly);
-
-            Debug.Log("Butterfly registered successfully.");
-        }
-        else
-        {
-            Debug.LogWarning("ButterflyMovement not found in spawned prefab.");
-        }
+       // if (targetController != null && ringTracker != null)
+        //{
+        //    ringTracker.SetButterflyController(targetController);
+        //}
     }
 }

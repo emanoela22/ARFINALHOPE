@@ -5,37 +5,43 @@ using TMPro;
 public class RingTracker : MonoBehaviour
 {
     [Header("References")]
-    [SerializeField] private Camera arCamera;
     [SerializeField] private RectTransform ringRectTransform;
     [SerializeField] private Image ringImage;
-    [SerializeField] private ButterflyMovement butterfly;
+    [SerializeField] private ButterflyUIManager butterflyUIManager;
     [SerializeField] private TMP_Text scoreText;
 
     [Header("Tracking Settings")]
-    [SerializeField] private float ringRadius = 75f;
+    [SerializeField] private float ringRadius = 80f;
     [SerializeField] private float holdTimeRequired = 1.0f;
 
     private float holdTimer = 0f;
     private int score = 0;
 
+    private void Start()
+    {
+        UpdateScoreText();
+        SetRingColor(Color.white);
+    }
+
     private void Update()
     {
-        if (butterfly == null || arCamera == null)
-            return;
+        RectTransform butterflyRect = butterflyUIManager != null
+            ? butterflyUIManager.GetCurrentButterflyRect()
+            : null;
 
-        Vector3 screenPos = arCamera.WorldToScreenPoint(butterfly.GetWorldPosition());
-
-        bool isVisible = screenPos.z > 0f;
-        if (!isVisible)
+        if (butterflyRect == null)
         {
-            SetRingColor(Color.white);
             holdTimer = 0f;
+            SetRingColor(Color.white);
             return;
         }
 
-        float distanceToCenter = Vector2.Distance(screenPos, ringRectTransform.position);
+        float distance = Vector2.Distance(
+            butterflyRect.position,
+            ringRectTransform.position
+        );
 
-        if (distanceToCenter <= ringRadius)
+        if (distance <= ringRadius)
         {
             holdTimer += Time.deltaTime;
             SetRingColor(Color.green);
@@ -44,8 +50,10 @@ public class RingTracker : MonoBehaviour
             {
                 score++;
                 UpdateScoreText();
-                butterfly.ResetButterflyPosition();
                 holdTimer = 0f;
+                SetRingColor(Color.white);
+
+                butterflyUIManager.ShowNextButterfly();
             }
         }
         else
@@ -71,16 +79,16 @@ public class RingTracker : MonoBehaviour
         }
     }
 
-    public void SetButterfly(ButterflyMovement newButterfly)
-    {
-        butterfly = newButterfly;
-    }
-
     public void ResetScore()
     {
         score = 0;
         holdTimer = 0f;
         UpdateScoreText();
         SetRingColor(Color.white);
+
+        if (butterflyUIManager != null)
+        {
+            butterflyUIManager.ShowNextButterfly();
+        }
     }
 }
