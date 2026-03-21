@@ -10,6 +10,7 @@ public class ButterflyAngularTracker : MonoBehaviour
     [SerializeField] private RectTransform playAreaRect;
     [SerializeField] private Image ringImage;
     [SerializeField] private TMP_Text scoreText;
+    [SerializeField] private RectTransform ringHitboxRect;
 
     [Header("Angular Mapping")]
     [SerializeField] private float maxYawDegrees = 20f;
@@ -114,12 +115,19 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     private void CheckRingOverlap()
     {
-        if (butterflyRect == null || ringRect == null)
+        if (butterflyRect == null || ringHitboxRect == null)
             return;
 
-        float distance = Vector2.Distance(butterflyRect.position, ringRect.position);
+        Vector3 butterflyCenter = butterflyRect.TransformPoint(butterflyRect.rect.center);
 
-        if (distance <= ringRadius)
+        bool inside =
+            RectTransformUtility.RectangleContainsScreenPoint(
+                ringHitboxRect,
+                butterflyCenter,
+                null
+            );
+
+        if (inside)
         {
             holdTimer += Time.deltaTime;
             SetRingColor(Color.green);
