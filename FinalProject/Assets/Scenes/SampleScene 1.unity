@@ -490,8 +490,8 @@ MonoBehaviour:
   ringHitboxRect: {fileID: 1107722345}
   maxYawDegrees: 15
   maxPitchDegrees: 8
-  horizontalRangePercent: 0.25
-  verticalRangePercent: 0.18
+  horizontalRangePercent: 0.7
+  verticalRangePercent: 0.5
   ringRadius: 50
   holdTimeRequired: 1
   trainLeftSide: 1
