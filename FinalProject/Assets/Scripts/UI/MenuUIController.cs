@@ -9,6 +9,8 @@ public class MenuUIController : MonoBehaviour
     public GameObject todaySessionPanel;
     public GameObject todayNotCompletedPanel;
     public GameObject lastSessionPanel;
+    public GameObject howToPlayPanel;
+    public GameObject settingsPanel;
 
     [Header("Home UI")]
     public TMP_Text welcomeText;
@@ -37,18 +39,15 @@ public class MenuUIController : MonoBehaviour
 
     public void RefreshAll()
     {
-        // Home
         if (welcomeText != null) welcomeText.text = "Welcome back, User";
         if (streakText != null) streakText.text = $"Streak:\nDay {Mathf.Max(1, ProgressStore.GetStreak())}";
 
-        // Today
         var today = ProgressStore.LoadToday();
         if (today != null)
         {
             SetTodayTexts(today);
         }
 
-        // Last
         var last = ProgressStore.LoadLast();
         if (last != null)
         {
@@ -74,6 +73,11 @@ public class MenuUIController : MonoBehaviour
     // ---------- Button Hooks ----------
     public void OnStartSessionPressed()
     {
+        ShowHowToPlay();
+    }
+
+    public void OnContinueFromHowToPlayPressed()
+    {
         SceneManager.LoadScene(arSceneName);
     }
 
@@ -95,6 +99,29 @@ public class MenuUIController : MonoBehaviour
         ShowHome();
     }
 
+    // ---------- Settings Hooks ----------
+    public void SetTrainingSide(int sideIndex)
+    {
+        // 0 = Left, 1 = Right
+        GameSettings.trainLeftSide = (sideIndex == 0);
+    }
+
+    public void SetSessionDuration(int durationIndex)
+    {
+        // 0 = 30s, 1 = 60s
+        GameSettings.sessionDuration = durationIndex == 0 ? 30f : 60f;
+    }
+
+    public void SetHoldTime(float value)
+    {
+        GameSettings.holdTime = value;
+    }
+
+    public void SetMovementRange(float value)
+    {
+        GameSettings.movementRange = value;
+    }
+
     // ---------- Panel helpers ----------
     void HideAll()
     {
@@ -102,6 +129,8 @@ public class MenuUIController : MonoBehaviour
         if (todaySessionPanel) todaySessionPanel.SetActive(false);
         if (todayNotCompletedPanel) todayNotCompletedPanel.SetActive(false);
         if (lastSessionPanel) lastSessionPanel.SetActive(false);
+        if (howToPlayPanel) howToPlayPanel.SetActive(false);
+        if (settingsPanel) settingsPanel.SetActive(false);
     }
 
     public void ShowHome()
@@ -126,5 +155,18 @@ public class MenuUIController : MonoBehaviour
     {
         HideAll();
         if (lastSessionPanel) lastSessionPanel.SetActive(true);
+    }
+
+    public void ShowSettings()
+    {
+        HideAll();
+        if (settingsPanel) settingsPanel.SetActive(true);
+    }
+
+
+    public void ShowHowToPlay()
+    {
+        HideAll();
+        if (howToPlayPanel) howToPlayPanel.SetActive(true);
     }
 }

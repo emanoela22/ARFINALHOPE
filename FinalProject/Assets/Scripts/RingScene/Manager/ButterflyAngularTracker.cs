@@ -28,6 +28,12 @@ public class ButterflyAngularTracker : MonoBehaviour
     [SerializeField] private bool trainLeftSide = true;
     [SerializeField][Range(0f, 1f)] private float neglectedSideBias = 0.8f;
 
+    [Header("Audio")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip targetEnteredClip;
+    [SerializeField] private AudioClip targetCompletedClip;
+
+    private bool wasInsideLastFrame = false;
     private float baselineYaw;
     private float baselinePitch;
     private Vector2 currentTargetAngles;
@@ -36,6 +42,11 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     private void Start()
     {
+        trainLeftSide = GameSettings.trainLeftSide;
+        holdTimeRequired = GameSettings.holdTime;
+        horizontalRangePercent = GameSettings.movementRange;
+        verticalRangePercent = GameSettings.movementRange * 0.6f;
+
         ResetBaseline();
         PickNextTarget();
         UpdateScoreText();
@@ -129,16 +140,31 @@ public class ButterflyAngularTracker : MonoBehaviour
 
         if (inside)
         {
+     
+            if (!wasInsideLastFrame && audioSource != null && targetEnteredClip != null)
+            {
+                audioSource.PlayOneShot(targetEnteredClip);
+            }
+
             holdTimer += Time.deltaTime;
             SetRingColor(Color.green);
 
             if (holdTimer >= holdTimeRequired)
             {
+
+                if (audioSource != null && targetCompletedClip != null)
+                {
+                    audioSource.PlayOneShot(targetCompletedClip);
+                }
+
                 score++;
                 UpdateScoreText();
                 holdTimer = 0f;
                 SetRingColor(Color.white);
                 PickNextTarget();
+
+                wasInsideLastFrame = false;
+                return;
             }
         }
         else
@@ -146,6 +172,8 @@ public class ButterflyAngularTracker : MonoBehaviour
             holdTimer = 0f;
             SetRingColor(Color.white);
         }
+
+        wasInsideLastFrame = inside;
     }
 
     private void SetRingColor(Color color)
