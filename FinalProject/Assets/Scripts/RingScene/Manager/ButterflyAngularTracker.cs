@@ -20,13 +20,26 @@ public class ButterflyAngularTracker : MonoBehaviour
     [SerializeField][Range(0.1f, 1f)] private float horizontalRangePercent = 0.35f;
     [SerializeField][Range(0.1f, 1f)] private float verticalRangePercent = 0.25f;
 
+    [Header("Movement Smoothing")]
+    [SerializeField][Range(0.02f, 0.3f)] private float movementSmoothTime = 0.1f;
+    [SerializeField][Range(0f, 2f)] private float angularDeadZone = 0.35f;
+
     [Header("Scoring")]
     [SerializeField] private float ringRadius = 90f;
     [SerializeField] private float holdTimeRequired = 1.0f;
 
     [Header("Training")]
     [SerializeField] private bool trainLeftSide = true;
-    [SerializeField][Range(0f, 1f)] private float neglectedSideBias = 0.8f;
+
+    [Header("Adaptive Difficulty")]
+    [SerializeField] private float startingMaxTargetYaw = 10f;
+    [SerializeField] private float maximumTargetYaw = 22f;
+    [SerializeField] private float targetYawStep = 2f;
+    [SerializeField] private float startingTargetPitch = 4f;
+    [SerializeField] private float maximumTargetPitch = 8f;
+    [SerializeField] private float targetPitchStep = 0.75f;
+    [SerializeField] private int quickSuccessesPerStep = 2;
+    [SerializeField] private float quickSuccessThresholdSeconds = 4f;
 
     [Header("Audio")]
     [SerializeField] private AudioSource audioSource;
@@ -39,13 +52,30 @@ public class ButterflyAngularTracker : MonoBehaviour
     private Vector2 currentTargetAngles;
     private float holdTimer;
     private int score;
+    private Vector2 movementVelocity;
+    private Camera trackingCamera;
+    private float currentMaxTargetYaw;
+    private float currentTargetPitch;
+    private float targetPresentedTime;
+    private int quickSuccessStreak;
+    private bool nextTargetIsTop;
+
+    public string CurrentQuadrant { get; private set; }
 
     private void Start()
     {
         trainLeftSide = GameSettings.trainLeftSide;
         holdTimeRequired = GameSettings.holdTime;
-        horizontalRangePercent = GameSettings.movementRange;
-        verticalRangePercent = GameSettings.movementRange * 0.6f;
+        // Older menu defaults reduced the usable area to 25%, which made the
+        // exercise look almost stationary. Keep the setting, but guarantee a
+        // clinically useful amount of visible travel.
+        horizontalRangePercent = Mathf.Clamp(GameSettings.movementRange, 0.5f, 0.95f);
+        verticalRangePercent = Mathf.Clamp(horizontalRangePercent * 0.6f, 0.3f, 0.65f);
+
+        trackingCamera = Camera.main;
+        currentMaxTargetYaw = Mathf.Clamp(startingMaxTargetYaw, 4f, maximumTargetYaw);
+        currentTargetPitch = Mathf.Clamp(startingTargetPitch, 2f, maximumTargetPitch);
+        nextTargetIsTop = Random.value >= 0.5f;
 
         ResetBaseline();
         PickNextTarget();
@@ -53,7 +83,7 @@ public class ButterflyAngularTracker : MonoBehaviour
         SetRingColor(Color.white);
     }
 
-    private void Update()
+    private void LateUpdate()
     {
         UpdateButterflyPosition();
         CheckRingOverlap();
@@ -61,45 +91,48 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     public void ResetBaseline()
     {
-        Vector3 euler = Camera.main.transform.eulerAngles;
+        if (!TryGetTrackingCamera(out Camera cam))
+            return;
+
+        Vector3 euler = cam.transform.eulerAngles;
         baselineYaw = NormalizeAngle(euler.y);
         baselinePitch = NormalizeAngle(euler.x);
+        movementVelocity = Vector2.zero;
     }
 
     private void PickNextTarget()
     {
-        float[] leftSlots = { -8f, -14f, -20f };
-        float[] centerSlots = { -2f, 0f, 2f };
-        float[] rightSlots = { 8f, 14f, 20f };
+        // Targets always stay on the selected rehabilitation side. As the
+        // player performs well, currentMaxTargetYaw expands farther outward.
+        float minimumYaw = Mathf.Max(5f, currentMaxTargetYaw - 5f);
+        float chosenMagnitude = Random.Range(minimumYaw, currentMaxTargetYaw);
+        float chosenYaw = trainLeftSide ? -chosenMagnitude : chosenMagnitude;
 
-        bool chooseNeglected = Random.value < neglectedSideBias;
-        float chosenYaw;
+        float pitchMagnitude = Random.Range(
+            Mathf.Max(2f, currentTargetPitch - 1.5f),
+            currentTargetPitch
+        );
 
-        if (trainLeftSide)
-        {
-            if (chooseNeglected)
-                chosenYaw = leftSlots[Random.Range(0, leftSlots.Length)];
-            else
-                chosenYaw = centerSlots[Random.Range(0, centerSlots.Length)];
-        }
-        else
-        {
-            if (chooseNeglected)
-                chosenYaw = rightSlots[Random.Range(0, rightSlots.Length)];
-            else
-                chosenYaw = centerSlots[Random.Range(0, centerSlots.Length)];
-        }
+        // In this camera mapping, a negative pitch offset appears in the top
+        // half of the screen and a positive offset appears in the bottom half.
+        float chosenPitch = nextTargetIsTop ? -pitchMagnitude : pitchMagnitude;
+        CurrentQuadrant = trainLeftSide
+            ? (nextTargetIsTop ? "LT" : "LB")
+            : (nextTargetIsTop ? "RT" : "RB");
 
-        float chosenPitch = Random.Range(-4f, 4f);
+        // Alternate vertically so a session exercises both quadrants rather
+        // than repeatedly choosing one corner by chance.
+        nextTargetIsTop = !nextTargetIsTop;
         currentTargetAngles = new Vector2(chosenYaw, chosenPitch);
+        targetPresentedTime = Time.time;
     }
 
     private void UpdateButterflyPosition()
     {
-        if (Camera.main == null || butterflyRect == null || playAreaRect == null)
+        if (!TryGetTrackingCamera(out Camera cam) || butterflyRect == null || playAreaRect == null)
             return;
 
-        Vector3 euler = Camera.main.transform.eulerAngles;
+        Vector3 euler = cam.transform.eulerAngles;
         float currentYaw = NormalizeAngle(euler.y);
         float currentPitch = NormalizeAngle(euler.x);
 
@@ -108,6 +141,10 @@ public class ButterflyAngularTracker : MonoBehaviour
 
         float yawDelta = Mathf.DeltaAngle(currentYaw, targetYaw);
         float pitchDelta = Mathf.DeltaAngle(currentPitch, targetPitch);
+
+        // Ignore tiny AR pose corrections and normal hand tremor.
+        if (Mathf.Abs(yawDelta) < angularDeadZone) yawDelta = 0f;
+        if (Mathf.Abs(pitchDelta) < angularDeadZone) pitchDelta = 0f;
 
         float normalizedX = Mathf.Clamp(yawDelta / maxYawDegrees, -1f, 1f);
         float normalizedY = Mathf.Clamp(-pitchDelta / maxPitchDegrees, -1f, 1f);
@@ -118,9 +155,16 @@ public class ButterflyAngularTracker : MonoBehaviour
         float maxX = halfWidth * horizontalRangePercent;
         float maxY = halfHeight * verticalRangePercent;
 
-        butterflyRect.anchoredPosition = new Vector2(
+        Vector2 targetPosition = new Vector2(
             normalizedX * maxX,
             normalizedY * maxY
+        );
+
+        butterflyRect.anchoredPosition = Vector2.SmoothDamp(
+            butterflyRect.anchoredPosition,
+            targetPosition,
+            ref movementVelocity,
+            movementSmoothTime
         );
     }
 
@@ -158,9 +202,15 @@ public class ButterflyAngularTracker : MonoBehaviour
                 }
 
                 score++;
+                RegisterSuccessfulTarget();
                 UpdateScoreText();
                 holdTimer = 0f;
                 SetRingColor(Color.white);
+
+                // The user has physically turned to bring this target into the
+                // ring. Make that new facing direction the centre of the next
+                // quadrant grid instead of keeping the session's first frame.
+                ResetBaseline();
                 PickNextTarget();
 
                 wasInsideLastFrame = false;
@@ -196,10 +246,48 @@ public class ButterflyAngularTracker : MonoBehaviour
         return angle;
     }
 
+    private void RegisterSuccessfulTarget()
+    {
+        float completionTime = Time.time - targetPresentedTime;
+        if (completionTime > quickSuccessThresholdSeconds)
+        {
+            quickSuccessStreak = 0;
+            return;
+        }
+
+        quickSuccessStreak++;
+        int successesNeeded = Mathf.Max(1, quickSuccessesPerStep);
+        if (quickSuccessStreak < successesNeeded)
+            return;
+
+        currentMaxTargetYaw = Mathf.Min(
+            maximumTargetYaw,
+            currentMaxTargetYaw + targetYawStep
+        );
+        currentTargetPitch = Mathf.Min(
+            maximumTargetPitch,
+            currentTargetPitch + targetPitchStep
+        );
+        quickSuccessStreak = 0;
+    }
+
+    private bool TryGetTrackingCamera(out Camera cam)
+    {
+        if (trackingCamera == null)
+            trackingCamera = Camera.main;
+
+        cam = trackingCamera;
+        return cam != null;
+    }
+
     public void ResetExercise()
     {
         score = 0;
         holdTimer = 0f;
+        quickSuccessStreak = 0;
+        currentMaxTargetYaw = Mathf.Clamp(startingMaxTargetYaw, 4f, maximumTargetYaw);
+        currentTargetPitch = Mathf.Clamp(startingTargetPitch, 2f, maximumTargetPitch);
+        nextTargetIsTop = Random.value >= 0.5f;
         UpdateScoreText();
         ResetBaseline();
         PickNextTarget();

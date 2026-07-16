@@ -12,8 +12,18 @@ public class SessionManager : MonoBehaviour
 
     private void Start()
     {
+        ForceLandscapeOrientation();
         remainingTime = GameSettings.sessionDuration;
         UpdateTimerText();
+    }
+
+    private static void ForceLandscapeOrientation()
+    {
+        Screen.autorotateToPortrait = false;
+        Screen.autorotateToPortraitUpsideDown = false;
+        Screen.autorotateToLandscapeLeft = true;
+        Screen.autorotateToLandscapeRight = true;
+        Screen.orientation = ScreenOrientation.LandscapeLeft;
     }
 
     private void Update()

@@ -33,8 +33,18 @@ public class MenuUIController : MonoBehaviour
 
     void Start()
     {
+        ForcePortraitOrientation();
         ShowHome();
         RefreshAll();
+    }
+
+    private static void ForcePortraitOrientation()
+    {
+        Screen.autorotateToPortrait = true;
+        Screen.autorotateToPortraitUpsideDown = false;
+        Screen.autorotateToLandscapeLeft = false;
+        Screen.autorotateToLandscapeRight = false;
+        Screen.orientation = ScreenOrientation.Portrait;
     }
 
     public void RefreshAll()
