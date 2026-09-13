@@ -9,6 +9,14 @@ public class SessionManager : MonoBehaviour
 
     private float remainingTime;
     private bool sessionRunning = true;
+    public bool IsPaused { get; set; }
+
+    public void RestartSession()
+    {
+        remainingTime = Mathf.Max(10f, GameSettings.sessionDuration);
+        sessionRunning = true;
+        UpdateTimerText();
+    }
 
     private void Start()
     {
@@ -28,7 +36,7 @@ public class SessionManager : MonoBehaviour
 
     private void Update()
     {
-        if (!sessionRunning)
+        if (!sessionRunning || IsPaused)
             return;
 
         remainingTime -= Time.deltaTime;

@@ -61,16 +61,27 @@ public class ButterflyAngularTracker : MonoBehaviour
     private bool nextTargetIsTop;
 
     public string CurrentQuadrant { get; private set; }
+    public bool IsPaused { get; set; }
+    public bool NeedsDirectionHint { get; private set; }
+    public Vector2 TargetDirection { get; private set; }
+    public RectTransform ButterflyRect => butterflyRect;
+    public event System.Action TargetCaught;
+
+    public void ApplySettings()
+    {
+        trainLeftSide = GameSettings.trainLeftSide;
+        holdTimeRequired = Mathf.Max(0.1f, GameSettings.holdTime);
+        horizontalRangePercent = Mathf.Clamp(GameSettings.movementRange, 0.3f, 0.95f);
+        verticalRangePercent = Mathf.Clamp(horizontalRangePercent * 0.6f, 0.18f, 0.65f);
+    }
 
     private void Start()
     {
         trainLeftSide = GameSettings.trainLeftSide;
         holdTimeRequired = GameSettings.holdTime;
-        // Older menu defaults reduced the usable area to 25%, which made the
-        // exercise look almost stationary. Keep the setting, but guarantee a
-        // clinically useful amount of visible travel.
-        horizontalRangePercent = Mathf.Clamp(GameSettings.movementRange, 0.5f, 0.95f);
-        verticalRangePercent = Mathf.Clamp(horizontalRangePercent * 0.6f, 0.3f, 0.65f);
+        ApplySettings();
+        if (GetComponent<ExerciseControls>() == null)
+            gameObject.AddComponent<ExerciseControls>();
 
         trackingCamera = Camera.main;
         currentMaxTargetYaw = Mathf.Clamp(startingMaxTargetYaw, 4f, maximumTargetYaw);
@@ -85,6 +96,11 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (IsPaused)
+        {
+            targetPresentedTime += Time.deltaTime;
+            return;
+        }
         UpdateButterflyPosition();
         CheckRingOverlap();
     }
@@ -148,6 +164,10 @@ public class ButterflyAngularTracker : MonoBehaviour
 
         float normalizedX = Mathf.Clamp(yawDelta / maxYawDegrees, -1f, 1f);
         float normalizedY = Mathf.Clamp(-pitchDelta / maxPitchDegrees, -1f, 1f);
+        TargetDirection = new Vector2(yawDelta / maxYawDegrees, -pitchDelta / maxPitchDegrees);
+        // Position is deliberately clamped to keep the target visible. Show a
+        // directional hint when the actual target lies beyond that mapped view.
+        NeedsDirectionHint = Mathf.Abs(TargetDirection.x) > 1f || Mathf.Abs(TargetDirection.y) > 1f;
 
         float halfWidth = playAreaRect.rect.width * 0.5f;
         float halfHeight = playAreaRect.rect.height * 0.5f;
@@ -164,7 +184,7 @@ public class ButterflyAngularTracker : MonoBehaviour
             butterflyRect.anchoredPosition,
             targetPosition,
             ref movementVelocity,
-            movementSmoothTime
+            movementSmoothTime / Mathf.Clamp(GameSettings.movementSpeed, 0.25f, 2f)
         );
     }
 
@@ -202,6 +222,7 @@ public class ButterflyAngularTracker : MonoBehaviour
                 }
 
                 score++;
+                TargetCaught?.Invoke();
                 RegisterSuccessfulTarget();
                 UpdateScoreText();
                 holdTimer = 0f;
@@ -282,6 +303,11 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     public void ResetExercise()
     {
+        ApplySettings();
+        wasInsideLastFrame = false;
+        NeedsDirectionHint = false;
+        var session = FindFirstObjectByType<SessionManager>();
+        if (session != null) session.RestartSession();
         score = 0;
         holdTimer = 0f;
         quickSuccessStreak = 0;
