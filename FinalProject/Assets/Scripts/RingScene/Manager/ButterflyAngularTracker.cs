@@ -21,7 +21,7 @@ public class ButterflyAngularTracker : MonoBehaviour
     [SerializeField][Range(0.1f, 1f)] private float verticalRangePercent = 0.25f;
 
     [Header("Movement Smoothing")]
-    [SerializeField][Range(0.02f, 0.3f)] private float movementSmoothTime = 0.1f;
+    [SerializeField][Range(0.02f, 0.06f)] private float movementSmoothTime = 0.035f;
     [SerializeField][Range(0f, 2f)] private float angularDeadZone = 0.35f;
 
     [Header("Scoring")]
@@ -52,6 +52,16 @@ public class ButterflyAngularTracker : MonoBehaviour
     private Vector2 currentTargetAngles;
     private float holdTimer;
     private int score;
+    private float totalCatchTime;
+    private Vector3 originalButterflyScale;
+    private float sizePhase;
+    private float sizeMultiplier = 1f;
+    private Material butterflyColourMaterial;
+    private Material originalButterflyMaterial;
+    private float targetTravelDuration;
+    public int Score => score;
+    public void HideLegacyScore() { if (scoreText != null) scoreText.gameObject.SetActive(false); }
+    public float AverageCatchTime => score > 0 ? totalCatchTime / score : 0f;
     private Vector2 movementVelocity;
     private Camera trackingCamera;
     private float currentMaxTargetYaw;
@@ -73,10 +83,43 @@ public class ButterflyAngularTracker : MonoBehaviour
         holdTimeRequired = Mathf.Max(0.1f, GameSettings.holdTime);
         horizontalRangePercent = Mathf.Clamp(GameSettings.movementRange, 0.3f, 0.95f);
         verticalRangePercent = Mathf.Clamp(horizontalRangePercent * 0.6f, 0.18f, 0.65f);
+        ApplyButterflyColour();
+    }
+
+    private void ApplyButterflyColour()
+    {
+        if (butterflyRect == null) return;
+        // The scene uses RawImage; Graphic supports both RawImage and Image.
+        var image = butterflyRect.GetComponent<Graphic>();
+        if (image == null) return;
+        if (butterflyColourMaterial == null)
+        {
+            var shader = Resources.Load<Shader>("ButterflyColour");
+            if (shader == null) return;
+            originalButterflyMaterial = image.material;
+            butterflyColourMaterial = new Material(shader);
+        }
+        image.material = butterflyColourMaterial;
+        int index = Mathf.Clamp(GameSettings.butterflyColour, 0, GameSettings.ButterflyColours.Length - 1);
+        butterflyColourMaterial.SetColor("_ButterflyColour", GameSettings.ButterflyColours[index]);
+        butterflyColourMaterial.SetFloat("_Recolour", index == 0 ? 0f : 1f);
+        image.SetMaterialDirty();
+    }
+
+    private void OnDestroy()
+    {
+        if (butterflyRect != null && butterflyColourMaterial != null)
+        {
+            var graphic = butterflyRect.GetComponent<Graphic>();
+            if (graphic != null && graphic.material == butterflyColourMaterial)
+                graphic.material = originalButterflyMaterial;
+        }
+        if (butterflyColourMaterial != null) Destroy(butterflyColourMaterial);
     }
 
     private void Start()
     {
+        if (butterflyRect != null) originalButterflyScale = butterflyRect.localScale;
         trainLeftSide = GameSettings.trainLeftSide;
         holdTimeRequired = GameSettings.holdTime;
         ApplySettings();
@@ -101,8 +144,33 @@ public class ButterflyAngularTracker : MonoBehaviour
             targetPresentedTime += Time.deltaTime;
             return;
         }
+        Vector2 previousPosition = butterflyRect != null ? butterflyRect.anchoredPosition : Vector2.zero;
         UpdateButterflyPosition();
+        UpdateButterflySize(previousPosition);
         CheckRingOverlap();
+    }
+
+    private void UpdateButterflySize(Vector2 previousPosition)
+    {
+        if (butterflyRect == null) return;
+        if (!GameSettings.adaptiveButterflySize)
+        {
+            sizeMultiplier = 1f;
+            butterflyRect.localScale = originalButterflyScale;
+            return;
+        }
+
+        // Change with actual travel, not a timer: stationary targets do not pulse.
+        // Freeze during a catch hold to keep the target easy to follow.
+        if (holdTimer > 0f) return;
+        float distance = Vector2.Distance(previousPosition, butterflyRect.anchoredPosition);
+        if (distance < 0.25f) return;
+        float width = playAreaRect != null ? Mathf.Max(1f, playAreaRect.rect.width) : 1920f;
+        sizePhase = Mathf.Repeat(sizePhase + distance / width * Mathf.PI * 4f, Mathf.PI * 2f);
+        float wave = Mathf.Sin(sizePhase);
+        float targetScale = 1f + wave * (wave >= 0f ? 0.25f : 0.15f);
+        sizeMultiplier = Mathf.Lerp(sizeMultiplier, targetScale, 1f - Mathf.Exp(-6f * Time.deltaTime));
+        butterflyRect.localScale = originalButterflyScale * sizeMultiplier;
     }
 
     public void ResetBaseline()
@@ -141,6 +209,8 @@ public class ButterflyAngularTracker : MonoBehaviour
         nextTargetIsTop = !nextTargetIsTop;
         currentTargetAngles = new Vector2(chosenYaw, chosenPitch);
         targetPresentedTime = Time.time;
+        // Speed controls travel to the next target, never phone-response lag.
+        targetTravelDuration = 0.55f / Mathf.Clamp(GameSettings.movementSpeed, 0.25f, 2f);
     }
 
     private void UpdateButterflyPosition()
@@ -152,8 +222,10 @@ public class ButterflyAngularTracker : MonoBehaviour
         float currentYaw = NormalizeAngle(euler.y);
         float currentPitch = NormalizeAngle(euler.x);
 
-        float targetYaw = baselineYaw + currentTargetAngles.x;
-        float targetPitch = baselinePitch + currentTargetAngles.y;
+        float progress = Mathf.Clamp01((Time.time - targetPresentedTime) / Mathf.Max(0.001f, targetTravelDuration));
+        float travel = Mathf.SmoothStep(0f, 1f, progress);
+        float targetYaw = baselineYaw + currentTargetAngles.x * travel;
+        float targetPitch = baselinePitch + currentTargetAngles.y * travel;
 
         float yawDelta = Mathf.DeltaAngle(currentYaw, targetYaw);
         float pitchDelta = Mathf.DeltaAngle(currentPitch, targetPitch);
@@ -184,12 +256,26 @@ public class ButterflyAngularTracker : MonoBehaviour
             butterflyRect.anchoredPosition,
             targetPosition,
             ref movementVelocity,
-            movementSmoothTime / Mathf.Clamp(GameSettings.movementSpeed, 0.25f, 2f)
+            Mathf.Clamp(movementSmoothTime, 0.02f, 0.04f)
         );
+        // Stop residual subpixel settling once the desired position is reached.
+        if ((butterflyRect.anchoredPosition - targetPosition).sqrMagnitude < 0.25f)
+        {
+            butterflyRect.anchoredPosition = targetPosition;
+            movementVelocity = Vector2.zero;
+        }
     }
 
     private void CheckRingOverlap()
     {
+        // Do not award another catch while the next butterfly leaves the ring.
+        if (Time.time - targetPresentedTime < targetTravelDuration)
+        {
+            holdTimer = 0f;
+            wasInsideLastFrame = false;
+            SetRingColor(Color.white);
+            return;
+        }
         if (butterflyRect == null || ringHitboxRect == null)
             return;
 
@@ -222,6 +308,7 @@ public class ButterflyAngularTracker : MonoBehaviour
                 }
 
                 score++;
+                totalCatchTime += Time.time - targetPresentedTime;
                 TargetCaught?.Invoke();
                 RegisterSuccessfulTarget();
                 UpdateScoreText();
@@ -303,12 +390,16 @@ public class ButterflyAngularTracker : MonoBehaviour
 
     public void ResetExercise()
     {
+        sizePhase = 0f;
+        sizeMultiplier = 1f;
+        if (butterflyRect != null) butterflyRect.localScale = originalButterflyScale;
         ApplySettings();
         wasInsideLastFrame = false;
         NeedsDirectionHint = false;
         var session = FindFirstObjectByType<SessionManager>();
         if (session != null) session.RestartSession();
         score = 0;
+        totalCatchTime = 0;
         holdTimer = 0f;
         quickSuccessStreak = 0;
         currentMaxTargetYaw = Mathf.Clamp(startingMaxTargetYaw, 4f, maximumTargetYaw);

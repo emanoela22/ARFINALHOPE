@@ -9,10 +9,17 @@ public class SessionManager : MonoBehaviour
 
     private float remainingTime;
     private bool sessionRunning = true;
+    private string sessionId;
+    private float elapsedTime;
+    private bool saved;
     public bool IsPaused { get; set; }
+    public void HideLegacyTimer() { if (timerText != null) timerText.gameObject.SetActive(false); }
 
     public void RestartSession()
     {
+        sessionId = System.Guid.NewGuid().ToString();
+        elapsedTime = 0;
+        saved = false;
         remainingTime = Mathf.Max(10f, GameSettings.sessionDuration);
         sessionRunning = true;
         UpdateTimerText();
@@ -21,8 +28,7 @@ public class SessionManager : MonoBehaviour
     private void Start()
     {
         ForceLandscapeOrientation();
-        remainingTime = GameSettings.sessionDuration;
-        UpdateTimerText();
+        RestartSession();
     }
 
     private static void ForceLandscapeOrientation()
@@ -40,6 +46,7 @@ public class SessionManager : MonoBehaviour
             return;
 
         remainingTime -= Time.deltaTime;
+        elapsedTime += Time.deltaTime;
 
         if (remainingTime <= 0f)
         {
@@ -62,8 +69,34 @@ public class SessionManager : MonoBehaviour
 
     private void EndSession()
     {
+        SaveProgress(true);
         SceneManager.LoadScene(menuSceneName);
     }
+
+    public void SaveProgress(bool completed = false)
+    {
+        if (saved || elapsedTime < 0.1f) return;
+        var tracker = FindFirstObjectByType<ButterflyAngularTracker>();
+        if (tracker == null) return;
+        ProgressStore.Record(new SessionResult
+        {
+            sessionId = sessionId,
+            dateLocal = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
+            score = tracker.Score,
+            avgReactionTime = tracker.AverageCatchTime,
+            neglectedSide = GameSettings.trainLeftSide ? "Left" : "Right",
+            durationSeconds = elapsedTime,
+            completed = completed
+        });
+        saved = completed;
+    }
+
+    private void OnApplicationPause(bool paused)
+    {
+        if (paused) SaveProgress();
+    }
+
+    private void OnApplicationQuit() => SaveProgress();
 
     public float GetRemainingTime()
     {

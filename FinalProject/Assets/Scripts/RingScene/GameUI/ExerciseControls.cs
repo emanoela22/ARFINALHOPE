@@ -10,6 +10,11 @@ public class ExerciseControls : MonoBehaviour
     private RectTransform safeArea;
     private GameObject panel;
     private TMP_Text sideText, speedText, rangeText, durationText, feedback;
+    private TMP_Text sessionHud;
+    private TMP_Text adaptiveSizeText;
+    private bool adaptiveSize;
+    private int colourChoice;
+    private TMP_Text colourText;
     private RectTransform arrow;
     private bool left;
     private float speed, range, duration;
@@ -31,6 +36,21 @@ public class ExerciseControls : MonoBehaviour
         scaler.referenceResolution = new Vector2(1920, 1080);
         scaler.matchWidthOrHeight = 0.5f;
         safeArea = Rect("Safe Area", canvasObject.transform, Vector2.zero, Vector2.zero);
+        tracker.HideLegacyScore();
+        if (session != null) session.HideLegacyTimer();
+        var hud = Rect("Session summary", safeArea, new Vector2(0, -72), new Vector2(540, 90));
+        hud.anchorMin = hud.anchorMax = new Vector2(0.5f, 1);
+        ModernUI.Surface(hud.gameObject.AddComponent<Image>(), ClinicalMenu.Paper, true);
+        sessionHud = Label(hud, "", Vector2.zero, new Vector2(520, 80), 32);
+        foreach (var button in FindObjectsByType<Button>(FindObjectsSortMode.None))
+            for (int i = 0; i < button.onClick.GetPersistentEventCount(); i++)
+                if (button.onClick.GetPersistentMethodName(i) == "OnBackToMenuPressed")
+                    button.gameObject.SetActive(false);
+        Button(safeArea, "End session", new Vector2(-190, 70), new Vector2(310, 90), () =>
+        {
+            if (session != null) session.SaveProgress();
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MenuScene");
+        }, new Vector2(1, 0));
         Button(safeArea, "Exercise settings", new Vector2(-210, -72), new Vector2(350, 90), Open,
             new Vector2(1, 1));
         Button(safeArea, "Reset", new Vector2(145, -72), new Vector2(220, 90), Reset,
@@ -49,24 +69,30 @@ public class ExerciseControls : MonoBehaviour
         blocker.anchorMin = Vector2.zero;
         blocker.anchorMax = Vector2.one;
         blocker.sizeDelta = Vector2.zero;
-        blocker.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.04f, 0.08f, 0.94f);
+        blocker.gameObject.AddComponent<Image>().color = ClinicalMenu.Paper;
         panel = blocker.gameObject;
-        Label(blocker, "Exercise settings", new Vector2(0, 360), new Vector2(1100, 90), 52);
-        Label(blocker, "Paused · Apply restarts the exercise", new Vector2(0, 280), new Vector2(1100, 65), 28);
-        sideText = Row(blocker, 160, () => { left = !left; Refresh(); }, () => { left = !left; Refresh(); });
-        speedText = Row(blocker, 45, () => { speed = Mathf.Max(0.25f, speed - 0.25f); Refresh(); },
+        Label(blocker, "Exercise settings", new Vector2(0, 440), new Vector2(1100, 90), 52);
+        Label(blocker, "Paused · Apply restarts the exercise", new Vector2(0, 365), new Vector2(1100, 65), 28);
+        sideText = Row(blocker, 255, () => { left = !left; Refresh(); }, () => { left = !left; Refresh(); });
+        speedText = Row(blocker, 145, () => { speed = Mathf.Max(0.25f, speed - 0.25f); Refresh(); },
             () => { speed = Mathf.Min(2f, speed + 0.25f); Refresh(); });
-        rangeText = Row(blocker, -70, () => { range = Mathf.Max(0.3f, range - 0.05f); Refresh(); },
+        rangeText = Row(blocker, 35, () => { range = Mathf.Max(0.3f, range - 0.05f); Refresh(); },
             () => { range = Mathf.Min(0.95f, range + 0.05f); Refresh(); });
-        durationText = Row(blocker, -185, () => { duration = Mathf.Max(15, duration - 15); Refresh(); },
+        durationText = Row(blocker, -75, () => { duration = Mathf.Max(15, duration - 15); Refresh(); },
             () => { duration = Mathf.Min(300, duration + 15); Refresh(); });
-        Button(blocker, "Cancel", new Vector2(-235, -340), new Vector2(350, 95), Close);
-        Button(blocker, "Apply & restart", new Vector2(235, -340), new Vector2(400, 95), Apply);
+        adaptiveSizeText = Row(blocker, -185, () => { adaptiveSize = !adaptiveSize; Refresh(); },
+            () => { adaptiveSize = !adaptiveSize; Refresh(); });
+        colourText = Row(blocker, -295,
+            () => { colourChoice = (colourChoice + GameSettings.ButterflyColourNames.Length - 1) % GameSettings.ButterflyColourNames.Length; Refresh(); },
+            () => { colourChoice = (colourChoice + 1) % GameSettings.ButterflyColourNames.Length; Refresh(); });
+        Button(blocker, "Cancel", new Vector2(-235, -410), new Vector2(350, 95), Close);
+        Button(blocker, "Apply & restart", new Vector2(235, -410), new Vector2(400, 95), Apply);
         panel.SetActive(false);
     }
 
     private void Update()
     {
+        sessionHud.text = $"Caught  {tracker.Score}     |     Time  {(session != null ? Mathf.CeilToInt(session.GetRemainingTime()) : 0)}s";
         Rect safe = Screen.safeArea;
         safeArea.anchorMin = new Vector2(safe.xMin / Screen.width, safe.yMin / Screen.height);
         safeArea.anchorMax = new Vector2(safe.xMax / Screen.width, safe.yMax / Screen.height);
@@ -93,6 +119,8 @@ public class ExerciseControls : MonoBehaviour
         speed = GameSettings.movementSpeed;
         range = Mathf.Clamp(GameSettings.movementRange, 0.3f, 0.95f);
         duration = GameSettings.sessionDuration;
+        adaptiveSize = GameSettings.adaptiveButterflySize;
+        colourChoice = GameSettings.butterflyColour;
         Refresh();
         tracker.IsPaused = true;
         if (session != null) session.IsPaused = true;
@@ -112,6 +140,8 @@ public class ExerciseControls : MonoBehaviour
         GameSettings.movementSpeed = speed;
         GameSettings.movementRange = range;
         GameSettings.sessionDuration = duration;
+        GameSettings.adaptiveButterflySize = adaptiveSize;
+        GameSettings.butterflyColour = colourChoice;
         Reset();
         Close();
     }
@@ -124,6 +154,8 @@ public class ExerciseControls : MonoBehaviour
 
     private void Refresh()
     {
+        adaptiveSizeText.text = "Adaptive size: " + (adaptiveSize ? "On" : "Off");
+        colourText.text = "Butterfly colour: " + GameSettings.ButterflyColourNames[colourChoice];
         sideText.text = "Direction: " + (left ? "Left (LT / LB)" : "Right (RT / RB)");
         speedText.text = $"Movement speed: {speed:0.##}x";
         rangeText.text = $"Movement range: {range:P0}";
@@ -145,10 +177,12 @@ public class ExerciseControls : MonoBehaviour
     private static TMP_Text Label(Transform parent, string text, Vector2 position, Vector2 size, int fontSize)
     {
         var label = Rect(text.Length > 0 ? text : "Label", parent, position, size).gameObject.AddComponent<TextMeshProUGUI>();
+        label.font = ModernUI.ReadableFont;
         label.text = text;
-        label.fontSize = fontSize;
+        label.fontSize = Mathf.Max(36, fontSize);
+        if (fontSize >= 40) label.fontStyle = FontStyles.Bold;
         label.alignment = TextAlignmentOptions.Center;
-        label.color = Color.white;
+        label.color = ClinicalMenu.Ink;
         label.raycastTarget = false;
         return label;
     }
@@ -159,11 +193,11 @@ public class ExerciseControls : MonoBehaviour
         var rect = Rect(text, parent, position, size);
         if (anchor.HasValue) rect.anchorMin = rect.anchorMax = anchor.Value;
         var background = rect.gameObject.AddComponent<Image>();
-        background.color = new Color(0.12f, 0.3f, 0.36f, 1f);
+        ModernUI.Surface(background, ClinicalMenu.Teal, true);
         var button = rect.gameObject.AddComponent<Button>();
         button.targetGraphic = background;
         button.onClick.AddListener(action);
-        Label(rect, text, Vector2.zero, size - new Vector2(12, 8), 30);
+        Label(rect, text, Vector2.zero, size - new Vector2(12, 8), 30).color = Color.white;
     }
 
     private static TMP_Text Row(Transform parent, float y, UnityEngine.Events.UnityAction minus, UnityEngine.Events.UnityAction plus)

@@ -36,6 +36,7 @@ public class MenuUIController : MonoBehaviour
         ForcePortraitOrientation();
         ShowHome();
         RefreshAll();
+        gameObject.AddComponent<ClinicalMenu>();
     }
 
     private static void ForcePortraitOrientation()

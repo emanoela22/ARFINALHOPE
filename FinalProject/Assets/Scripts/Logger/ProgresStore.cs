@@ -3,9 +3,43 @@ using System;
 
 public static class ProgressStore
 {
+    [Serializable]
+    private class History { public System.Collections.Generic.List<SessionResult> sessions = new(); }
+    private const string HistoryKey = "NEGLECT_SESSION_HISTORY_V1";
+
+    public static System.Collections.Generic.List<SessionResult> LoadHistory()
+    {
+        try
+        {
+            var data = JsonUtility.FromJson<History>(PlayerPrefs.GetString(HistoryKey, "{}"));
+            return data?.sessions ?? new System.Collections.Generic.List<SessionResult>();
+        }
+        catch (Exception) { return new System.Collections.Generic.List<SessionResult>(); }
+    }
+
+    public static void Record(SessionResult result)
+    {
+        var records = LoadHistory();
+        int index = records.FindIndex(r => r.sessionId == result.sessionId);
+        if (index >= 0) records[index] = result;
+        else records.Add(result);
+        PlayerPrefs.SetString(HistoryKey, JsonUtility.ToJson(new History { sessions = records }));
+        SaveLast(result);
+        SaveToday(result);
+    }
     private const string KEY_LAST = "NEGLECT_LAST_SESSION_JSON";
     private const string KEY_TODAY = "NEGLECT_TODAY_SESSION_JSON";
     private const string KEY_TODAY_DATE = "NEGLECT_TODAY_DATE";
+
+    public static void ResetStatistics()
+    {
+        // Clear only the score store, preserving unrelated preferences.
+        PlayerPrefs.DeleteKey(HistoryKey);
+        PlayerPrefs.DeleteKey(KEY_LAST);
+        PlayerPrefs.DeleteKey(KEY_TODAY);
+        PlayerPrefs.DeleteKey(KEY_TODAY_DATE);
+        PlayerPrefs.Save();
+    }
 
     public static string TodayDateLocal()
         => DateTime.Now.ToString("yyyy-MM-dd");
@@ -44,7 +78,7 @@ public static class ProgressStore
 
     public static int GetStreak()
     {
-        // Simple “streak” placeholder:
+        // Simple ï¿½streakï¿½ placeholder:
         // 1 if today completed, else 0. (We can expand later to real streak history)
         return HasTodaySession() ? 1 : 0;
     }

@@ -10,4 +10,7 @@ public class SessionResult
     public float avgReactionTime;
     public float hitRate;
     public string neglectedSide; //left/right
+    public string sessionId;
+    public float durationSeconds;
+    public bool completed;
 }

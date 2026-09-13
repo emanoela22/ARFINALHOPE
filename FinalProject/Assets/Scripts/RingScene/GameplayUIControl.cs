@@ -7,6 +7,7 @@ public class GameplayUIController : MonoBehaviour
 
     public void OnBackToMenuPressed()
     {
+        FindFirstObjectByType<SessionManager>()?.SaveProgress();
         SceneManager.LoadScene(menuSceneName);
     }
 }
