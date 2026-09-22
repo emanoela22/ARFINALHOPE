@@ -97,3 +97,7 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Local MediaPipe dependency (277 MiB; exceeds GitHub's ordinary file limit).
+# Fresh clones must obtain v0.16.3 and place this archive at the same path.
+/FinalProject/Packages/com.github.homuler.mediapipe-0.16.3.tgz

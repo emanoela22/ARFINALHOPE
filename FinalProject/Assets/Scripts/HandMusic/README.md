@@ -1,0 +1,13 @@
+# Hand Music
+
+Entry: ClinicalMenu → Hand Music → Open front camera. The standalone HandMusic scene has no ARSession and uses an ordinary front-camera WebCamTexture.
+
+Two-hand mode: left hand opens to enable playing, closes to stop; right hand counts 1–5 raised fingers for C4, D4, E4, F4 and G4. Swap hands reverses the roles. Four straight fingers are sufficient for the control-open gesture; thumb extension is counted separately on the note hand. Landmark distances are normalized to palm width. These are initial heuristic thresholds and require testing with intended users; they do not measure clinical ability.
+
+Hold time is adjustable from 0.3–1.5 seconds. Holding a count plays once. Changing the count allows another note; repeating the same count requires lowering all note-hand fingers for 0.25 seconds. Losing tracking does not re-arm a held note. Losing the control hand or stale camera frames stops playback. CPU inference is capped at 10 frames per second with up to two hands, using a requested 640×480 camera stream. Camera frames remain local and are not saved or uploaded. The synthesized notes do not require microphone permission.
+
+Choose song offers Hot Cross Buns and Twinkle, Twinkle, Little Star. Twinkle uses C C G G A A G / F F E E D D C / G G F F E E D / G G F F E E D / C C G G A A G / F F E E D D C. To reach A4 without a sixth finger, the note hand uses thumb–index pinch with another finger extended. Pinch takes priority over finger counting. Song selection stops audio and starts the selected tune from its beginning; cancelling keeps song progress. The guide advances only on the correct played note, without a time limit. Restart resets the selected song. Full camera expands the preview (preserving its aspect ratio); controls can be restored without restarting. Skeletons and bright fingertip markers are attached to the exact upright camera rectangle so they remain aligned when resized. Mint is the control hand, gold is the note hand, and white fingertip markers mean a finger is counted as raised.
+
+Dependency: MediaPipe Unity Plugin 0.16.3 (MIT), https://github.com/homuler/MediaPipeUnityPlugin/releases/tag/v0.16.3 . Hand-landmark model: https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task . Model API documentation: https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker .
+
+Editor smoke check: Unity -batchmode -quit -projectPath <project> -executeMethod HandMusicCheck.Run . This checks the gesture gate, synthetic poses, scene wiring and actual native-model inference on a blank frame. Front-camera orientation, performance and recognition on a real hand still require a phone test.

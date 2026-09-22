@@ -113,6 +113,7 @@ public class ClinicalMenu : MonoBehaviour
         var today = history.Where(r => r.dateLocal != null && r.dateLocal.StartsWith(ProgressStore.TodayDateLocal())).ToList();
         ExerciseHero();
         Action("Start exercise   →", Instructions);
+        Action("Hand Music   →", HandMusicInstructions, false);
         var row = Item("Today's statistics", 330);
         var columns = row.AddComponent<HorizontalLayoutGroup>();
         columns.spacing = 24;
@@ -124,6 +125,17 @@ public class ClinicalMenu : MonoBehaviour
         ScoreChart(history);
         Text($"{history.Sum(r => r.score)} lifetime catches  ·  {history.Count} saved sessions", 28, 70, Ink);
         Text("Saved on this device. Session lengths and settings can affect scores.", 25, 90, Ink);
+    }
+
+    private void HandMusicInstructions()
+    {
+        Clear("Hand Music", "Prop up the phone in landscape and show both hands to the front camera.");
+        Navigation("");
+        Card("YOUR CONTROL HAND", "Open to play · Fist to stop", "Your left hand controls playback. Your right hand chooses notes. Use Swap hands to reverse them.");
+        Card("YOUR NOTE HAND", "1–5 fingers = C–G", "Hold a finger count to play a note. Lower all fingers briefly before repeating the same note.");
+        Card("CHOOSE A SONG", "Hot Cross Buns or Twinkle", "Use Choose song to switch tunes. Follow each note at your own pace. For A, pinch thumb and index with another finger raised.");
+        Action("Open front camera", () => SceneManager.LoadScene("HandMusic"));
+        Action("Back", Home, false);
     }
 
     private void Instructions()
