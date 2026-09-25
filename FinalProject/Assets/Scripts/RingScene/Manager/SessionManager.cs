@@ -51,8 +51,7 @@ public class SessionManager : MonoBehaviour
         if (remainingTime <= 0f)
         {
             remainingTime = 0f;
-            sessionRunning = false;
-            EndSession();
+            FinishSession(true);
         }
 
         UpdateTimerText();
@@ -67,18 +66,44 @@ public class SessionManager : MonoBehaviour
         }
     }
 
-    private void EndSession()
+    // Records the session and shows its results; the menu is one tap away from there.
+    public void FinishSession(bool completed)
     {
-        SaveProgress(true);
-        SceneManager.LoadScene(menuSceneName);
+        if (!sessionRunning) return;
+        sessionRunning = false;
+        var tracker = FindFirstObjectByType<ButterflyAngularTracker>();
+        if (tracker != null) tracker.IsPaused = true;
+        var earlier = ProgressStore.LoadHistory();
+        var result = SaveProgress(completed);
+        // The session is over: a later app pause must not re-save it as unfinished.
+        saved = true;
+        if (result == null)
+        {
+            SceneManager.LoadScene(menuSceneName);
+            return;
+        }
+        var summary = SessionRewards.Summarize(result, earlier,
+            SessionRewards.ButterflyPace(GameSettings.holdTime, GameSettings.movementSpeed, GameSettings.movementRange),
+            Mathf.Max(10f, GameSettings.sessionDuration));
+        result.stars = summary.stars;
+        ProgressStore.Record(result);
+        SessionResultsScreen.Show(summary, menuSceneName, PlayAgain, tracker.PlayCatchSound);
     }
 
-    public void SaveProgress(bool completed = false)
+    public void PlayAgain()
     {
-        if (saved || elapsedTime < 0.1f) return;
         var tracker = FindFirstObjectByType<ButterflyAngularTracker>();
         if (tracker == null) return;
-        ProgressStore.Record(new SessionResult
+        tracker.ResetExercise(); // also restarts this timer under a new session id
+        tracker.IsPaused = false;
+    }
+
+    public SessionResult SaveProgress(bool completed = false)
+    {
+        if (saved || elapsedTime < 0.1f) return null;
+        var tracker = FindFirstObjectByType<ButterflyAngularTracker>();
+        if (tracker == null) return null;
+        var result = new SessionResult
         {
             sessionId = sessionId,
             dateLocal = System.DateTime.Now.ToString("yyyy-MM-dd HH:mm"),
@@ -87,8 +112,10 @@ public class SessionManager : MonoBehaviour
             neglectedSide = GameSettings.trainLeftSide ? "Left" : "Right",
             durationSeconds = elapsedTime,
             completed = completed
-        });
+        };
+        ProgressStore.Record(result);
         saved = completed;
+        return result;
     }
 
     private void OnApplicationPause(bool paused)

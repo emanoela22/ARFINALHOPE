@@ -1,99 +1,20 @@
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.SceneManagement;
 using TMPro;
 
 public partial class HandMusicController
 {
-    private static readonly string[] NoteNames={"—","C","D","E","F","G","A"};
-    private GameObject songSelector;
+    private static readonly string[] NoteNames={"-","C","D","E","F","G","A"};
+    private GameObject songSelector, measureAgain, circleRow;
     private bool selectingSong;
-    private static string NoteInstruction(int note) => note==6?"Pinch thumb + index":$"{note} finger{(note==1?"":"s")}";
-    private RectTransform cameraBox,statusBox,guidePanel,compactPanel;
+    private RectTransform cameraBox,guidePanel,compactPanel;
     private HandTrackingOverlay overlay;
     private HandPoseGraphic nextPose;
-    private TMP_Text roleLabel,detectionLabel,nextLabel,songLabel,compactLabel,fullButton;
+    private TMP_Text detectionLabel,nextLabel,actionLabel,songLabel,compactLabel,fullButton,circleLabel;
     private bool fullCamera;
-    private readonly FingerMaskFilter[] fingerFilters={new FingerMaskFilter(),new FingerMaskFilter()};
-    private string detectionSummary="Show both hands";
-
-    private void ProcessHands(bool detected,float elapsed)
-    {
-        int control=-1,note=-1;
-        float controlConfidence=0,noteConfidence=0;
-        ClearOverlay();
-        if(detected && result.handedness!=null && result.handWorldLandmarks!=null && result.handLandmarks!=null)
-        {
-            int count=Mathf.Min(result.handedness.Count,Mathf.Min(result.handWorldLandmarks.Count,result.handLandmarks.Count));
-            for(int i=0;i<count;i++)
-            {
-                var categories=result.handedness[i].categories;
-                if(categories==null || categories.Count==0 || result.handWorldLandmarks[i].landmarks.Count<21 || result.handLandmarks[i].landmarks.Count<21)continue;
-                var category=categories[0];
-                if(category.score<.7f)continue;
-                bool isLeft=category.categoryName=="Left";
-                if(category.categoryName!="Left" && category.categoryName!="Right")continue;
-                // The input is a mirrored selfie. For an unmirrored external camera, swap the label.
-                if(!front)isLeft=!isLeft;
-                if(isLeft==controlLeft)
-                { if(category.score>controlConfidence) { control=i;controlConfidence=category.score; } }
-                else if(category.score>noteConfidence) { note=i;noteConfidence=category.score; }
-            }
-        }
-        int controlCount=-1,noteCount=-1;
-        MusicGesture controlPose=MusicGesture.None;
-        for(int role=0;role<2;role++)
-        {
-            int index=role==0?control:note;
-            if(index<0) { fingerFilters[role].Reset();continue; }
-            var world=result.handWorldLandmarks[index].landmarks;
-            var normalized=result.handLandmarks[index].landmarks;
-            for(int j=0;j<21;j++)
-            {
-                landmarks[j]=new Vector3(world[j].x,world[j].y,world[j].z);
-                overlay.points[role][j]=new Vector2(normalized[j].x,1-normalized[j].y);
-            }
-            overlay.visible[role]=true;
-            overlay.masks[role]=fingerFilters[role].Sample(HandGesture.FingerMask(landmarks));
-            int raised=HandGesture.FingerCount(overlay.masks[role]);
-            if(role==0) { controlCount=raised;controlPose=HandGesture.Classify(landmarks); }
-            else noteCount=HandGesture.Classify(landmarks)==MusicGesture.Pinch?6:raised;
-        }
-        overlay.SetVerticesDirty();
-        if(selectingSong) { StopPlaying();return; }
-        if(control<0 || controlPose==MusicGesture.Fist) StopPlaying();
-        else if(controlPose==MusicGesture.Open)
-        {
-            openHeld+=elapsed;
-            if(openHeld>=.25f)playing=true;
-        }
-        else openHeld=0;
-        // Both hands are needed; a missing note hand also silences a ringing note.
-        if(note<0)audioSource.Stop();
-        bool fired=gate.Sample(Mathf.Max(0,noteCount),note>=0,playing,elapsed,holdSeconds);
-        bool correct=false;
-        if(fired)
-        {
-            audioSource.Stop();audioSource.PlayOneShot(notes[noteCount-1],.65f);
-            notesPlayed++;countLabel.text="Notes: "+notesPlayed;
-            correct=song.Play(noteCount);
-        }
-        string controlStatus=control<0?"not visible":playing?"PLAY":"STOP";
-        detectionSummary=$"Control: {controlStatus} · Note hand: {(noteCount<0?"not visible":NoteInstruction(noteCount))}";
-        detectionLabel.text=$"Control: {controlStatus}   ({(controlCount<0?"—":controlCount.ToString())})\nNotes: {(noteCount<0?"not visible":NoteInstruction(noteCount)+" = "+NoteNames[noteCount])}\nWhite fingertips = raised";
-        progress.fillAmount=gate.Progress(holdSeconds);
-        if(control<0)status.text="Show your control hand. Playback is stopped.";
-        else if(!playing)status.text="Open your control hand to enable playing.";
-        else if(note<0)status.text="Playing enabled. Show your note hand.";
-        else if(song.Complete)status.text="Song complete! Restart the song to try again.";
-        else if(fired && !correct)status.text=$"You played {NoteNames[noteCount]}. Try {NoteNames[song.Next]}: {NoteInstruction(song.Next)}.";
-        else status.text="Hold the note gesture. Lower fingers to repeat the same note.";
-        RefreshSongGuide();
-    }
 
     private void StopPlaying()
     {
-        playing=false;openHeld=0;
         if(audioSource!=null)audioSource.Stop();
     }
     private void ClearOverlay()
@@ -101,81 +22,105 @@ public partial class HandMusicController
         if(overlay==null)return;
         overlay.visible[0]=overlay.visible[1]=false;overlay.SetVerticesDirty();
     }
-    private void SwapHands()
-    {
-        foreach(var filter in fingerFilters)filter.Reset();
-        controlLeft=!controlLeft;StopPlaying();gate.Reset();ClearOverlay();RefreshRoles();
-        status.text="Hands swapped. Open your new control hand.";
-    }
     private void RestartSong()
     {
-        song.Reset();gate.Reset();StopPlaying();notesPlayed=0;countLabel.text="Notes: 0";RefreshSongGuide();
-        status.text="Song restarted. Open your control hand to play.";
+        song.Reset();dwell.Reset();StopPlaying();
+        if(sessionRunning && CircleMode)NextTarget();
+        RefreshSongGuide();
+        status.text="Song restarted from the beginning.";
     }
-    private void RefreshRoles()
+    private void MeasureAgain()
     {
-        roleLabel.text=$"{(controlLeft?"Left":"Right")} hand: open = play, fist = stop\n{(controlLeft?"Right":"Left")} hand: count fingers for notes";
+        calibration.Reset();openGate.Reset();progress.fillAmount=0;
+        status.text=$"Let's measure again. Show your {Side} hand.";
     }
+    // How to play the next note: the finger count (or pinch) in Fingers mode, an open hand otherwise.
+    private string NextGesture() => Mode==HandMusicMode.OpenHand ? "Open hand" : song.Next==6 ? "Pinch" : Capital(Shown(song.Next));
+    private string NextAction() => Mode==HandMusicMode.OpenHand ? $"Open your {Side} hand"
+        : song.Next==6 ? "Pinch thumb and index, another finger up, in the gold circle" : "Hold them up in the gold circle";
     private void RefreshSongGuide()
     {
         songLabel.text=$"{song.Title}\n{song.Position}/{song.Length} notes";
-        nextLabel.text=song.Complete?"Well played!":$"Next: {NoteNames[song.Next]}\n{NoteInstruction(song.Next)}";
-        nextPose.gesture=song.Next==6?MusicGesture.Pinch:MusicGesture.Open;
-        nextPose.fingerCount=song.Next==6?-1:song.Next;nextPose.SetVerticesDirty();
-        compactLabel.text=(song.Complete?"Song complete!":$"Next: {NoteNames[song.Next]} · {NoteInstruction(song.Next)}   |   {song.Position}/{song.Length}")+"\n"+detectionSummary;
+        nextLabel.text=song.Complete?"Well played!":$"Next: {NoteNames[song.Next]}\n<size=34>{NextGesture()}</size>";
+        actionLabel.text=song.Complete?"The song starts again in a moment.":NextAction();
+        // The picture shows the trained hand as it appears in the mirrored camera view.
+        nextPose.mirrored=TrainLeft;
+        nextPose.gesture=Mode==HandMusicMode.Fingers && song.Next==6?MusicGesture.Pinch:MusicGesture.Open;
+        nextPose.fingerCount=Mode==HandMusicMode.Fingers && song.Next!=6?song.Next:-1;nextPose.SetVerticesDirty();
+        detectionLabel.text=detectionSummary+(Mode==HandMusicMode.Fingers?" · white tips = raised":"");
+        compactLabel.text=(song.Complete?"Song complete!":$"Next: {NoteNames[song.Next]} · {NextGesture()} · {NextAction()}   |   {song.Position}/{song.Length}")+"\n"+status.text;
     }
 
     private void BuildGuideUI()
     {
-        guidePanel=Rect("Song guidance",safe,new Vector2(.68f,.02f),new Vector2(.98f,.85f));
+        guidePanel=Panel("Song guidance",safe,new Vector2(.66f,.03f),new Vector2(.98f,.865f));
         ModernUI.Surface(guidePanel.gameObject.AddComponent<Image>(),Color.white,true);
-        songLabel=Text(guidePanel,"",new Vector2(.04f,.86f),new Vector2(.96f,.99f),30);
-        nextPose=Rect("Next fingers",guidePanel,new Vector2(.03f,.64f),new Vector2(.31f,.87f)).gameObject.AddComponent<HandPoseGraphic>();
+        status=Text(guidePanel,"Starting front camera…",new Vector2(.05f,.855f),new Vector2(.95f,.975f),30);
+        nextPose=Rect("Next hand pose",guidePanel,new Vector2(.04f,.61f),new Vector2(.36f,.85f)).gameObject.AddComponent<HandPoseGraphic>();
         nextPose.gesture=MusicGesture.Open;nextPose.color=ClinicalMenu.Teal;nextPose.raycastTarget=false;
-        nextLabel=Text(guidePanel,"",new Vector2(.36f,.64f),new Vector2(.96f,.85f),38);
-        roleLabel=Text(guidePanel,"",new Vector2(.04f,.49f),new Vector2(.96f,.64f),29);
-        detectionLabel=Text(guidePanel,"Control: not visible\nNotes: not visible\nWhite fingertips = raised",new Vector2(.04f,.30f),new Vector2(.96f,.48f),30);
-        Text(guidePanel,"1=C  2=D  3=E  4=F  5=G  Pinch=A",new Vector2(.04f,.23f),new Vector2(.96f,.30f),26);
-        Button(guidePanel,"Swap hands",new Vector2(.04f,.145f),new Vector2(.48f,.225f),SwapHands);
-        Button(guidePanel,"Restart song",new Vector2(.52f,.145f),new Vector2(.96f,.225f),RestartSong);
-        holdLabel=Text(guidePanel,"Hold time: 0.6s",new Vector2(.04f,.075f),new Vector2(.96f,.14f),30);
-        Button(guidePanel,"Slower",new Vector2(.04f,.01f),new Vector2(.48f,.075f),()=>ChangeHold(.2f));
-        Button(guidePanel,"Faster",new Vector2(.52f,.01f),new Vector2(.96f,.075f),()=>ChangeHold(-.2f));
-        compactPanel=Rect("Full camera guidance",safe,new Vector2(.30f,.70f),new Vector2(.97f,.86f));
+        nextLabel=Text(guidePanel,"",new Vector2(.4f,.61f),new Vector2(.95f,.85f),48);
+        actionLabel=Text(guidePanel,"",new Vector2(.05f,.52f),new Vector2(.95f,.61f),28);
+        songLabel=Text(guidePanel,"",new Vector2(.05f,.44f),new Vector2(.95f,.52f),26);
+        var track=Rect("Hold progress",guidePanel,new Vector2(.05f,.41f),new Vector2(.95f,.43f));
+        track.gameObject.AddComponent<Image>().color=new Color(.77f,.87f,.88f);
+        progress=Rect("Progress",track,Vector2.zero,Vector2.one).gameObject.AddComponent<Image>();
+        // Filled images need a sprite; a plain one keeps the bar square like its track.
+        progress.sprite=Sprite.Create(Texture2D.whiteTexture,new Rect(0,0,4,4),new Vector2(.5f,.5f));
+        progress.color=ClinicalMenu.Teal; progress.type=Image.Type.Filled; progress.fillMethod=Image.FillMethod.Horizontal; progress.fillAmount=0;
+        detectionLabel=Text(guidePanel,"",new Vector2(.05f,.31f),new Vector2(.95f,.4f),26);
+        Button(guidePanel,"Restart song",new Vector2(.05f,.215f),new Vector2(CircleMode?.95f:.48f,.295f),RestartSong);
+        measureAgain=Button(guidePanel,"Measure again",new Vector2(.52f,.215f),new Vector2(.95f,.295f),MeasureAgain).transform.parent.gameObject;
+        measureAgain.SetActive(!CircleMode);
+        // The gold circle can be resized during play; the size is saved like the other settings.
+        circleRow=Rect("Circle size",guidePanel,new Vector2(.05f,.12f),new Vector2(.95f,.2f)).gameObject;
+        circleLabel=Text(circleRow.transform,$"Circle: {GameSettings.handMusicCircle:P0}",new Vector2(0,0),new Vector2(.31f,1),28);
+        Button(circleRow.transform,"Smaller",new Vector2(.33f,0),new Vector2(.65f,1),()=>ChangeCircle(-.1f));
+        Button(circleRow.transform,"Bigger",new Vector2(.67f,0),new Vector2(1,1),()=>ChangeCircle(.1f));
+        circleRow.SetActive(CircleMode);
+        holdLabel=Text(guidePanel,$"Hold: {GameSettings.handMusicHold:0.0}s",new Vector2(.05f,.02f),new Vector2(.33f,.1f),28);
+        Button(guidePanel,"Slower",new Vector2(.35f,.02f),new Vector2(.64f,.1f),()=>ChangeHold(.1f));
+        Button(guidePanel,"Faster",new Vector2(.66f,.02f),new Vector2(.95f,.1f),()=>ChangeHold(-.1f));
+        // Full camera guidance stays on the other half, clear of the trained side's circles and hand.
+        compactPanel=Panel("Full camera guidance",safe,new Vector2(.5f,.68f),new Vector2(.97f,.86f));
         ModernUI.Surface(compactPanel.gameObject.AddComponent<Image>(),ClinicalMenu.Paper);
-        compactLabel=Text(compactPanel,"",new Vector2(.02f,.04f),new Vector2(.98f,.96f),38);
+        compactLabel=Text(compactPanel,"",new Vector2(.02f,.04f),new Vector2(.98f,.96f),32);
         compactPanel.gameObject.SetActive(false);
-        RefreshRoles();RefreshSongGuide();
+        detectionSummary=$"{Capital(Side)} hand: not visible\n{Capital(GameSettings.OtherSide)} hand: resting";
+        RefreshSongGuide();
     }
     private void BuildTopBar()
     {
-        var bar=Rect("Toolbar",safe,new Vector2(.02f,.88f),new Vector2(.98f,.98f));
+        var bar=Rect("Toolbar",safe,new Vector2(.02f,.885f),new Vector2(.98f,.985f));
         ModernUI.Surface(bar.gameObject.AddComponent<Image>(),ClinicalMenu.Paper);
-        Text(bar,"Hand Music",new Vector2(.01f,0),new Vector2(.21f,1),42);
-        countLabel=Text(bar,"Notes: 0",new Vector2(.215f,0),new Vector2(.33f,1),30);
-        Button(bar,"Choose song",new Vector2(.34f,.04f),new Vector2(.55f,.96f),OpenSongSelector);
-        fullButton=Button(bar,"Full camera",new Vector2(.565f,.04f),new Vector2(.77f,.96f),ToggleFullCamera);
-        Button(bar,"Back to menu",new Vector2(.785f,.04f),new Vector2(.99f,.96f),()=>SceneManager.LoadScene("MenuScene"));
+        // Mirrored with the layout: the score, time and End session sit on the side that is not neglected.
+        Mirror(Text(bar,"Hand Music",new Vector2(.01f,0),new Vector2(.15f,1),40).rectTransform);
+        Mirror(Button(bar,"Choose song",new Vector2(.16f,.06f),new Vector2(.31f,.94f),OpenSongSelector).transform.parent);
+        fullButton=Button(bar,"Full camera",new Vector2(.32f,.06f),new Vector2(.48f,.94f),ToggleFullCamera);Mirror(fullButton.transform.parent);
+        countLabel=Text(bar,"Notes: 0",new Vector2(.51f,0),new Vector2(.64f,1),30);Mirror(countLabel.rectTransform);
+        timeLabel=Text(bar,"Time",new Vector2(.65f,0),new Vector2(.78f,1),30);Mirror(timeLabel.rectTransform);
+        Mirror(Button(bar,"End session",new Vector2(.79f,.06f),new Vector2(.99f,.94f),()=>FinishSession(false)).transform.parent);
     }
+    private static void Mirror(Transform item) { var r=(RectTransform)item; Place(r,r.anchorMin,r.anchorMax); }
+    // Centred, so it reads the same whichever side is neglected.
     private void BuildSongSelector()
     {
         var panel=Rect("Choose a song",safe,Vector2.zero,Vector2.one);
         panel.gameObject.AddComponent<Image>().color=ClinicalMenu.Paper;
         songSelector=panel.gameObject;
-        Text(panel,"Choose a song",new Vector2(.12f,.78f),new Vector2(.9f,.94f),60);
-        Text(panel,"Follow the next note and gesture. The song waits for you.",new Vector2(.12f,.66f),new Vector2(.9f,.77f),36);
+        Text(panel,"Choose a song",new Vector2(.12f,.78f),new Vector2(.88f,.94f),60).alignment=TextAlignmentOptions.Center;
+        Text(panel,"The song waits for you and repeats until the time is up.",new Vector2(.12f,.66f),new Vector2(.88f,.77f),36).alignment=TextAlignmentOptions.Center;
         for(int i=0;i<GuidedHandSong.Titles.Length;i++)
         {
             int choice=i;float top=.60f-i*.16f;
             Button(panel,GuidedHandSong.Titles[i],new Vector2(.12f,top-.12f),new Vector2(.88f,top),()=>SelectSong(choice));
         }
-        Text(panel,"Twinkle adds A: pinch thumb and index together, with another finger raised.",new Vector2(.12f,.15f),new Vector2(.9f,.29f),34);
+        Text(panel,"In Fingers mode, Twinkle adds A: pinch thumb and index together, with another finger raised.",new Vector2(.12f,.15f),new Vector2(.88f,.29f),34).alignment=TextAlignmentOptions.Center;
         Button(panel,"Cancel",new Vector2(.36f,.03f),new Vector2(.64f,.13f),()=>{ selectingSong=false;songSelector.SetActive(false); });
         songSelector.SetActive(false);
     }
     private void OpenSongSelector()
     {
-        StopPlaying();gate.Reset();selectingSong=true;songSelector.SetActive(true);
+        StopPlaying();dwell.Reset();selectingSong=true;songSelector.SetActive(true);
     }
     private void SelectSong(int index)
     {
@@ -184,11 +129,8 @@ public partial class HandMusicController
     private void ToggleFullCamera()
     {
         fullCamera=!fullCamera;
-        cameraBox.anchorMin=fullCamera?Vector2.zero:new Vector2(.02f,.22f);
-        cameraBox.anchorMax=fullCamera?Vector2.one:new Vector2(.65f,.85f);
-        cameraBox.offsetMin=cameraBox.offsetMax=Vector2.zero;
+        Place(cameraBox,fullCamera?Vector2.zero:new Vector2(.02f,.03f),fullCamera?Vector2.one:new Vector2(.645f,.865f));
         guidePanel.gameObject.SetActive(!fullCamera);compactPanel.gameObject.SetActive(fullCamera);
-        statusBox.anchorMax=new Vector2(fullCamera?.98f:.65f,fullCamera?.15f:.19f);
         fullButton.text=fullCamera?"Show controls":"Full camera";
     }
 }

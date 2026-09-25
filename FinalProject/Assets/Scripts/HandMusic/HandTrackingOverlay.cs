@@ -4,9 +4,38 @@ using UnityEngine.UI;
 [RequireComponent(typeof(CanvasRenderer))]
 public class HandTrackingOverlay : Graphic
 {
+    // Seconds the drawn hand takes to catch up with a new sample, so it glides between samples.
+    private const float Glide=.06f;
     public readonly Vector2[][] points={new Vector2[21],new Vector2[21]};
     public readonly bool[] visible=new bool[2];
     public readonly int[] masks=new int[2];
+    // What is drawn: it follows the tracked points above rather than jumping to each new sample.
+    private readonly Vector2[][] shown={new Vector2[21],new Vector2[21]};
+    private readonly Vector2[][] speed={new Vector2[21],new Vector2[21]};
+    private readonly bool[] placed=new bool[2];
+    private void Update()
+    {
+        bool moved=false;
+        for(int hand=0;hand<2;hand++)
+        {
+            if(!visible[hand]){placed[hand]=false;continue;}
+            if(!placed[hand]){Place(hand);moved=true;continue;}
+            for(int j=0;j<21;j++)
+            {
+                var before=shown[hand][j];
+                shown[hand][j]=Vector2.SmoothDamp(before,points[hand][j],ref speed[hand][j],Glide,Mathf.Infinity,Time.unscaledDeltaTime);
+                if((shown[hand][j]-before).sqrMagnitude>1e-10f)moved=true;
+            }
+        }
+        if(moved)SetVerticesDirty();
+    }
+    // A hand that has just come into view is drawn where it is, not glided in from where it was last seen.
+    private void Place(int hand)
+    {
+        System.Array.Copy(points[hand],shown[hand],21);
+        System.Array.Clear(speed[hand],0,21);
+        placed[hand]=true;
+    }
     protected override void OnPopulateMesh(VertexHelper vh)
     {
         vh.Clear();
@@ -14,6 +43,7 @@ public class HandTrackingOverlay : Graphic
         for(int hand=0;hand<2;hand++)
         {
             if(!visible[hand])continue;
+            if(!placed[hand])Place(hand);
             Color tint=hand==0 ? new Color(.1f,1f,.8f) : new Color(1f,.75f,.15f);
             for(int finger=0;finger<5;finger++)
             {
@@ -29,7 +59,7 @@ public class HandTrackingOverlay : Graphic
             Line(vh,At(r,hand,13),At(r,hand,17),5,tint);
         }
     }
-    private Vector2 At(Rect r,int hand,int point)=>r.min+Vector2.Scale(points[hand][point],r.size);
+    private Vector2 At(Rect r,int hand,int point)=>r.min+Vector2.Scale(shown[hand][point],r.size);
     private static void Line(VertexHelper vh,Vector2 a,Vector2 b,float width,Color tint)
     {
         var d=(b-a).normalized;var n=new Vector2(-d.y,d.x)*width*.5f;int i=vh.currentVertCount;

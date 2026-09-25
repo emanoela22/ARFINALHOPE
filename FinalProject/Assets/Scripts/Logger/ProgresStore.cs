@@ -76,10 +76,47 @@ public static class ProgressStore
 
     public static bool HasTodaySession() => LoadToday() != null;
 
-    public static int GetStreak()
+    public static int GetStreak() => CurrentStreak(LoadHistory(), DateTime.Now);
+
+    // Days in a row with at least one finished session that caught or played something (either
+    // exercise), up to today. A streak that reached yesterday stays alive until today is over, so it
+    // is not lost first thing in the morning.
+    public static int CurrentStreak(System.Collections.Generic.List<SessionResult> history, DateTime today)
     {
-        // Simple �streak� placeholder:
-        // 1 if today completed, else 0. (We can expand later to real streak history)
-        return HasTodaySession() ? 1 : 0;
+        var days = PracticeDays(history);
+        var day = today.Date;
+        if (!days.Contains(day)) day = day.AddDays(-1);
+        int streak = 0;
+        for (; days.Contains(day); day = day.AddDays(-1)) streak++;
+        return streak;
+    }
+
+    public static int BestStreak(System.Collections.Generic.List<SessionResult> history)
+    {
+        var days = new System.Collections.Generic.List<DateTime>(PracticeDays(history));
+        days.Sort();
+        int best = 0, run = 0;
+        for (int i = 0; i < days.Count; i++)
+        {
+            run = i > 0 && days[i] == days[i - 1].AddDays(1) ? run + 1 : 1;
+            best = Math.Max(best, run);
+        }
+        return best;
+    }
+
+    // The calendar day a session was saved on, from its "yyyy-MM-dd HH:mm" stamp.
+    public static bool TryGetDay(SessionResult result, out DateTime day)
+    {
+        day = default;
+        return result.dateLocal != null && result.dateLocal.Length >= 10 && DateTime.TryParseExact(result.dateLocal.Substring(0, 10),
+            "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out day);
+    }
+
+    private static System.Collections.Generic.HashSet<DateTime> PracticeDays(System.Collections.Generic.List<SessionResult> history)
+    {
+        var days = new System.Collections.Generic.HashSet<DateTime>();
+        foreach (var result in history)
+            if (result.completed && result.score > 0 && TryGetDay(result, out var day)) days.Add(day);
+        return days;
     }
 }

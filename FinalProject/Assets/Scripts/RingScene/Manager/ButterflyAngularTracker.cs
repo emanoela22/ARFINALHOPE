@@ -62,6 +62,9 @@ public class ButterflyAngularTracker : MonoBehaviour
     public int Score => score;
     public void HideLegacyScore() { if (scoreText != null) scoreText.gameObject.SetActive(false); }
     public float AverageCatchTime => score > 0 ? totalCatchTime / score : 0f;
+    public void PlayCatchSound() { if (audioSource != null && targetCompletedClip != null) audioSource.PlayOneShot(targetCompletedClip); }
+    // Speed controls travel to the next target, never phone-response lag.
+    public static float TravelSeconds(float movementSpeed) => 0.55f / Mathf.Clamp(movementSpeed, 0.25f, 2f);
     private Vector2 movementVelocity;
     private Camera trackingCamera;
     private float currentMaxTargetYaw;
@@ -209,8 +212,7 @@ public class ButterflyAngularTracker : MonoBehaviour
         nextTargetIsTop = !nextTargetIsTop;
         currentTargetAngles = new Vector2(chosenYaw, chosenPitch);
         targetPresentedTime = Time.time;
-        // Speed controls travel to the next target, never phone-response lag.
-        targetTravelDuration = 0.55f / Mathf.Clamp(GameSettings.movementSpeed, 0.25f, 2f);
+        targetTravelDuration = TravelSeconds(GameSettings.movementSpeed);
     }
 
     private void UpdateButterflyPosition()
@@ -301,12 +303,7 @@ public class ButterflyAngularTracker : MonoBehaviour
 
             if (holdTimer >= holdTimeRequired)
             {
-
-                if (audioSource != null && targetCompletedClip != null)
-                {
-                    audioSource.PlayOneShot(targetCompletedClip);
-                }
-
+                PlayCatchSound();
                 score++;
                 totalCatchTime += Time.time - targetPresentedTime;
                 TargetCaught?.Invoke();

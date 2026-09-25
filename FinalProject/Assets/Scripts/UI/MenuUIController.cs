@@ -115,22 +115,26 @@ public class MenuUIController : MonoBehaviour
     {
         // 0 = Left, 1 = Right
         GameSettings.trainLeftSide = (sideIndex == 0);
+        GameSettings.Save();
     }
 
     public void SetSessionDuration(int durationIndex)
     {
         // 0 = 30s, 1 = 60s
         GameSettings.sessionDuration = durationIndex == 0 ? 30f : 60f;
+        GameSettings.Save();
     }
 
     public void SetHoldTime(float value)
     {
         GameSettings.holdTime = value;
+        GameSettings.Save();
     }
 
     public void SetMovementRange(float value)
     {
         GameSettings.movementRange = value;
+        GameSettings.Save();
     }
 
     // ---------- Panel helpers ----------

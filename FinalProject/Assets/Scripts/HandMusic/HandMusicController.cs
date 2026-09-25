@@ -20,24 +20,27 @@ public partial class HandMusicController : MonoBehaviour
     private HandLandmarkerResult result;
     private RawImage preview;
     private AspectRatioFitter previewAspect;
-    private TMP_Text status, holdLabel, countLabel;
+    private TMP_Text status, holdLabel, countLabel, timeLabel;
     private Image progress;
     private RectTransform safe;
     private AudioSource audioSource;
     private AudioClip[] notes = new AudioClip[6];
     private Vector3[] landmarks = new Vector3[21];
-    private readonly FingerNoteGate gate = new FingerNoteGate();
     private readonly GuidedHandSong song = new GuidedHandSong();
-    private bool controlLeft = true, playing;
-    private float openHeld;
-    private float holdSeconds = 0.6f, nextFrame, lastSample;
-    private int notesPlayed;
+    private float nextFrame, lastSample;
     private bool ready, paused, front;
     private long lastTimestamp;
+    private int previousFrameRate = -1;
+    // The trained (neglected) side comes from Settings; it decides the playing hand, cues and layout.
+    private static bool TrainLeft => GameSettings.trainLeftSide;
+    private static string Side => GameSettings.TrainedSide;
 
     private IEnumerator Start()
     {
         Screen.orientation = ScreenOrientation.LandscapeLeft;
+        // The preview, cues and tracked hand move at 60 fps; the camera itself delivers 30.
+        previousFrameRate = Application.targetFrameRate;
+        Application.targetFrameRate = 60;
         BuildUI();
         BuildAudio();
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -71,14 +74,14 @@ public partial class HandMusicController : MonoBehaviour
         while (webcam.width <= 16 && Time.realtimeSinceStartup < timeout) yield return null;
         if (webcam.width <= 16) { status.text = "Camera did not start. Close other camera apps and try again."; yield break; }
         if (!CreateDetector()) yield break;
-        status.text = "Show both hands. Open your control hand to play.";
+        status.text = $"Find the gold line on your {Side}, then show your {Side} hand.";
         lastSample = Time.realtimeSinceStartup;
         ready = true;
     }
 
     private bool StartCamera(string device)
     {
-        try { webcam = new WebCamTexture(device,640,480,15); webcam.Play(); return true; }
+        try { webcam = new WebCamTexture(device,640,480,30); webcam.Play(); return true; }
         catch (Exception e) { Fail("Could not open the camera",e); return false; }
     }
     private bool CreateDetector()
@@ -102,7 +105,12 @@ public partial class HandMusicController : MonoBehaviour
         var area = Screen.safeArea;
         safe.anchorMin = new Vector2(area.xMin/Screen.width,area.yMin/Screen.height);
         safe.anchorMax = new Vector2(area.xMax/Screen.width,area.yMax/Screen.height);
-        if (ready && !paused && Time.realtimeSinceStartup-lastSample > .6f)
+        LayoutPreview();
+        bool tracking = ready && !paused && Time.realtimeSinceStartup-lastSample <= .6f;
+        TickSession(Time.unscaledDeltaTime, tracking);
+        TickCues(Time.unscaledDeltaTime);
+        if (sessionOver) return;
+        if (ready && !paused && !tracking)
         { StopPlaying();ClearOverlay();status.text="Waiting for camera tracking…"; }
         if (!ready || paused || !webcam.isPlaying || !webcam.didUpdateThisFrame || Time.realtimeSinceStartup < nextFrame) return;
         nextFrame = Time.realtimeSinceStartup + 0.1f;
@@ -133,9 +141,6 @@ public partial class HandMusicController : MonoBehaviour
             uprightPixels = new Color32[ow*oh];
             sourcePixels = new Color32[w*h];
             frame = new Mediapipe.Unity.Experimental.TextureFrame(ow,oh,TextureFormat.RGBA32);
-            preview.texture = upright;
-            preview.color = Color.white;
-            previewAspect.aspectRatio = (float)ow/oh;
         }
         webcam.GetPixels32(sourcePixels);
         for (int y=0;y<h;y++) for (int x=0;x<w;x++)
@@ -150,6 +155,30 @@ public partial class HandMusicController : MonoBehaviour
         }
         upright.SetPixels32(uprightPixels);
         upright.Apply(false);
+    }
+
+    // The preview shows the camera's own texture, so it updates at the camera's rate.
+    private void LayoutPreview()
+    {
+        if (webcam == null || webcam.width <= 16) return;
+        if (preview.texture != webcam) { preview.texture = webcam; preview.color = Color.white; }
+        int rotation = webcam.videoRotationAngle;
+        previewAspect.aspectRatio = rotation%180==0 ? (float)webcam.width/webcam.height : (float)webcam.height/webcam.width;
+        FitPreview(preview, cameraImage.rect.size, rotation, webcam.videoVerticallyMirrored, front);
+    }
+
+    // Shows the raw camera image exactly like the upright image the hands are tracked on (see
+    // UpdateUprightTexture), so the tracked fingers line up with it. Flips go in the UVs, in the camera
+    // image's own axes; the turn rotates the preview, which keeps the camera image's shape so it fills
+    // the box once turned. Mirroring the image reverses the direction of the turn.
+    private static void FitPreview(RawImage image, Vector2 box, int rotation, bool verticallyMirrored, bool mirrored)
+    {
+        image.uvRect = new Rect(mirrored?1:0, verticallyMirrored?1:0, mirrored?-1:1, verticallyMirrored?-1:1);
+        var rect = image.rectTransform;
+        var size = rotation%180==0 ? box : new Vector2(box.y,box.x);
+        if (rect.sizeDelta != size) { rect.anchorMin = rect.anchorMax = new Vector2(.5f,.5f); rect.sizeDelta = size; }
+        var turn = Quaternion.Euler(0,0,mirrored?rotation:-rotation);
+        if (rect.localRotation != turn) rect.localRotation = turn;
     }
 
     private void BuildAudio()
@@ -175,6 +204,15 @@ public partial class HandMusicController : MonoBehaviour
         }
     }
 
+    // Notes are panned toward where they are played, so sound also draws attention to that side.
+    private void PlayNote(int note, float pan, float volume = .65f)
+    {
+        if (note < 1 || note > notes.Length) return;
+        audioSource.Stop();
+        audioSource.panStereo = Mathf.Clamp(pan, -1, 1);
+        audioSource.PlayOneShot(notes[note-1], volume);
+    }
+
     private void BuildUI()
     {
         if (FindFirstObjectByType<EventSystem>() == null) new GameObject("Event system",typeof(EventSystem),typeof(InputSystemUIInputModule));
@@ -185,28 +223,42 @@ public partial class HandMusicController : MonoBehaviour
         scaler.uiScaleMode=CanvasScaler.ScaleMode.ScaleWithScreenSize; scaler.referenceResolution=new Vector2(1920,1080); scaler.matchWidthOrHeight=.5f;
         canvas.AddComponent<Image>().color=ClinicalMenu.Paper;
         safe=Rect("Safe area",canvas.transform,Vector2.zero,Vector2.one);
-        cameraBox=Rect("Camera panel",safe,new Vector2(.02f,.22f),new Vector2(.65f,.85f));
+        // The camera (where the hands play) sits on the trained side; guidance stays on the other side.
+        cameraBox=Panel("Camera panel",safe,new Vector2(.02f,.03f),new Vector2(.645f,.865f));
         ModernUI.Surface(cameraBox.gameObject.AddComponent<Image>(),new Color(.08f,.17f,.2f));
-        var cameraImage=Rect("Camera",cameraBox,Vector2.zero,Vector2.one);
-        preview=cameraImage.gameObject.AddComponent<RawImage>(); preview.raycastTarget=false; preview.color=Color.clear;
+        cameraImage=Rect("Camera",cameraBox,Vector2.zero,Vector2.one);
         previewAspect=cameraImage.gameObject.AddComponent<AspectRatioFitter>(); previewAspect.aspectMode=AspectRatioFitter.AspectMode.FitInParent;
+        previewAspect.aspectRatio=4f/3f;
+        // The live image is its own child, so turning it (FitPreview) leaves the cues and tracked hands upright.
+        preview=Rect("Camera feed",cameraImage,Vector2.zero,Vector2.one).gameObject.AddComponent<RawImage>(); preview.raycastTarget=false; preview.color=Color.clear;
+        BuildCues();
         overlay=Rect("Tracked fingers",cameraImage,Vector2.zero,Vector2.one).gameObject.AddComponent<HandTrackingOverlay>();overlay.raycastTarget=false;
+        BuildCountBadge();
         BuildGuideUI();
-        statusBox=Rect("Status panel",safe,new Vector2(.02f,.03f),new Vector2(.65f,.19f));
-        ModernUI.Surface(statusBox.gameObject.AddComponent<Image>(),ClinicalMenu.Paper);
-        status=Text(statusBox,"Starting front camera…",new Vector2(.02f,.22f),new Vector2(.98f,.97f),36);
-        var track=Rect("Hold progress",statusBox,new Vector2(.02f,.04f),new Vector2(.98f,.14f));
-        track.gameObject.AddComponent<Image>().color=new Color(.77f,.87f,.88f);
-        progress=Rect("Progress",track,Vector2.zero,Vector2.one).gameObject.AddComponent<Image>();
-        ModernUI.Surface(progress,ClinicalMenu.Teal); progress.type=Image.Type.Filled; progress.fillMethod=Image.FillMethod.Horizontal; progress.fillAmount=0;
         BuildTopBar();
         BuildSongSelector();
+        RefreshCounters();
     }
-    private void ChangeHold(float delta) { holdSeconds=Mathf.Clamp(holdSeconds+delta,.3f,1.5f); holdLabel.text=$"Hold time: {holdSeconds:0.0}s"; gate.Reset(); }
+    private void ChangeHold(float delta)
+    {
+        GameSettings.handMusicHold=Mathf.Clamp(Mathf.Round((GameSettings.handMusicHold+delta)*10)/10,.3f,1.5f);
+        GameSettings.Save();
+        holdLabel.text=$"Hold: {GameSettings.handMusicHold:0.0}s"; dwell.Reset();
+    }
     private static RectTransform Rect(string name,Transform parent,Vector2 min,Vector2 max)
     {
         var r=new GameObject(name,typeof(RectTransform)).GetComponent<RectTransform>(); r.SetParent(parent,false);
         r.anchorMin=min;r.anchorMax=max;r.offsetMin=r.offsetMax=Vector2.zero;return r;
+    }
+    // Layout anchors are written for left-side training and mirrored for the right.
+    private static RectTransform Panel(string name,Transform parent,Vector2 min,Vector2 max)
+    {
+        var r=Rect(name,parent,min,max); Place(r,min,max); return r;
+    }
+    private static void Place(RectTransform r,Vector2 min,Vector2 max)
+    {
+        if (!TrainLeft) (min.x,max.x)=(1-max.x,1-min.x);
+        r.anchorMin=min;r.anchorMax=max;r.offsetMin=r.offsetMax=Vector2.zero;
     }
     private static TMP_Text Text(Transform parent,string text,Vector2 min,Vector2 max,int size)
     {
@@ -225,12 +277,14 @@ public partial class HandMusicController : MonoBehaviour
     private void OnApplicationPause(bool value)
     {
         paused=value;
+        if (value) SaveProgress(false);
         if (webcam==null || !ready) return;
         if (value) { webcam.Pause();StopPlaying();ClearOverlay(); }
-        else { webcam.Play();lastSample=Time.realtimeSinceStartup; }
+        else if (!sessionOver) { webcam.Play();lastSample=Time.realtimeSinceStartup; }
     }
     private void OnDestroy()
     {
+        Application.targetFrameRate=previousFrameRate;
         ready=false;webcam?.Stop();if(webcam!=null)Destroy(webcam);
         (detector as IDisposable)?.Dispose();frame?.Dispose();if(upright!=null)Destroy(upright);
         foreach(var clip in notes)if(clip!=null)Destroy(clip);

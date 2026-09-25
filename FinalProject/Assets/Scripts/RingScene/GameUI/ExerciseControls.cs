@@ -48,8 +48,8 @@ public class ExerciseControls : MonoBehaviour
                     button.gameObject.SetActive(false);
         Button(safeArea, "End session", new Vector2(-190, 70), new Vector2(310, 90), () =>
         {
-            if (session != null) session.SaveProgress();
-            UnityEngine.SceneManagement.SceneManager.LoadScene("MenuScene");
+            if (session != null) session.FinishSession(false);
+            else UnityEngine.SceneManagement.SceneManager.LoadScene("MenuScene");
         }, new Vector2(1, 0));
         Button(safeArea, "Exercise settings", new Vector2(-210, -72), new Vector2(350, 90), Open,
             new Vector2(1, 1));
@@ -142,6 +142,7 @@ public class ExerciseControls : MonoBehaviour
         GameSettings.sessionDuration = duration;
         GameSettings.adaptiveButterflySize = adaptiveSize;
         GameSettings.butterflyColour = colourChoice;
+        GameSettings.Save();
         Reset();
         Close();
     }
